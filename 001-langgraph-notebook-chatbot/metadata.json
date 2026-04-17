@@ -1,0 +1,27 @@
+{
+  "id": "001",
+  "name": "langgraph-notebook-chatbot",
+  "source": {
+    "library": "langgraph",
+    "version": ">=0.2,<1.0",
+    "url": "https://github.com/langchain-ai/langgraph",
+    "license": "MIT",
+    "commit_sha": "N/A (라이브러리 의존 사용; 코드 복제 아님)"
+  },
+  "converted_at": "2026-04-17",
+  "agent_version": "0.1.0",
+  "dependencies_used": ["langgraph"],
+  "extracted_features": [
+    "LangGraph StateGraph 기반 멀티턴 챗봇 (MemorySaver 체크포인터 + thread_id)",
+    "LangSmith 스타일 observability 트레이서 (노드/LLM/tool span, 토큰, latency)",
+    "self-contained HTML trace 뷰어 (외부 리소스/JS fetch 없음)",
+    "Jupyter 노트북에서 IPython.display로 인라인 렌더 + 외부 파일 저장 모두 지원",
+    "외부 네트워크/transformers 의존 없는 MockLLM (워크플로 시연용)"
+  ],
+  "limitations": [
+    "MockLLM은 실제 언어모델이 아닌 에코-스타일 시뮬레이터입니다. 사내 실제 LLM 어댑터로 교체해야 의미 있는 응답이 나옵니다.",
+    "토큰 수는 공백 기준 단어 수 근사입니다. 실제 토크나이저 기반 수치가 필요하면 교체하세요.",
+    "트레이서는 in-memory 저장만 지원합니다. 영속화는 HTML 파일 export 형태로만 제공됩니다 (CLAUDE.md 정책).",
+    "LangSmith의 웹 기반 비교/팀 공유 기능은 제공하지 않습니다. 스냅샷 단위 HTML 뷰어만 제공합니다."
+  ]
+}
