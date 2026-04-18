@@ -20,10 +20,7 @@
 → 코드는 **누구나 읽을 수 있을 만큼 친절해야 함**
 
 ### 기술 스택
-- **모델**: Hugging Face Transformers (로컬 LLM train/inference)
-- **Agentic Workflow**: Tool calling 기반 다단계 추론
-- **데이터/ML**: scikit-learn, numpy, pandas
-- **데이터 처리**: SQL
+구체적인 허용 패키지/Python 버전은 `references/allowed-stacks/<active>.yaml`로 외부화되어 있습니다. (활성 스택은 `active_stack.txt`로 지정) 자세한 내용은 섹션 4 참고.
 
 ---
 
@@ -64,6 +61,21 @@ Agent는 다음 하이브리드 플로우로 동작합니다:
 <repo-root>/
 ├── README.md                    # 리포 전체 개요, 변환물 인덱스
 ├── CLAUDE.md                    # (이 문서)
+├── active_stack.txt             # 현재 활성 스택 이름 (references/allowed-stacks/ 내 파일명)
+├── references/                  # 환경·스택·API 매핑 등 참조 자료
+│   ├── README.md
+│   ├── allowed-stacks/          # 환경 스택 정의 (금융사별로 교체 가능)
+│   │   └── datascience-baseline.yaml
+│   └── api-mappings/            # 버전별 API 변경 매핑
+│       ├── scikit-learn.yaml
+│       ├── pandas.yaml
+│       ├── numpy.yaml
+│       ├── torch.yaml
+│       ├── python-syntax.yaml
+│       └── package-substitutions.yaml
+├── skills/                      # Claude Code가 사용하는 Skill 문서
+│   └── environment-adapter/
+│       └── SKILL.md             # 환경 호환성 조정 Skill
 ├── 001-image-segmentation/      # 변환물 #1
 ├── 002-text-classification/     # 변환물 #2
 ├── 003-anomaly-detection/       # 변환물 #3
@@ -91,9 +103,9 @@ Agent는 다음 하이브리드 플로우로 동작합니다:
 ├── <main>.py               # 핵심 single-file 소스코드
 ├── metadata.json           # 변환 메타데이터
 ├── LICENSE                 # 원본 라이선스 파일 복제본
-├── examples/               # 학습/사용 데모 (.py 또는 .ipynb — 변환물 특성에 맞게 선택)
-│   ├── demo.ipynb          # 또는 basic_usage.py — 핵심 기능을 "가장 잘 보여주는" 데모
-│   └── train.py            # 필요 시 (또는 train.ipynb)
+├── examples/               # 학습/사용 예제 스크립트
+│   ├── basic_usage.py
+│   └── train.py            # 필요 시
 └── data/                   # 샘플 데이터 (작은 파일만)
     └── sample.csv
 ```
@@ -106,7 +118,7 @@ Agent는 다음 하이브리드 플로우로 동작합니다:
 - **원본 출처**: 라이브러리명, 버전, GitHub URL, 라이선스
 - **기능 요약**: 이 변환물이 제공하는 핵심 기능 (원본 대비 축약된 부분 명시)
 - **의존성**: 허용 목록 중 실제 사용한 것
-- **사용 예시**: `examples/` 안의 데모 파일 (`.py` 스크립트 또는 `.ipynb` 노트북) 참조 안내
+- **사용 예시**: `examples/basic_usage.py` 참조 안내
 - **알려진 제약/한계점**
 
 #### `<main>.py`
@@ -143,15 +155,12 @@ Agent는 다음 하이브리드 플로우로 동작합니다:
 #### `LICENSE`
 - **원본 라이브러리의 LICENSE 파일을 그대로 복제**
 - 파일 상단에 "이 라이선스는 원본 `<라이브러리명> v<버전>`에서 가져왔습니다"라는 주석 추가 가능
-- 원본이 MIT/Apache-2.0/BSD 계열이 아니면 **변환 자체를 거부**해야 함 (섹션 6 참고)
+- 원본 라이선스가 **활성 스택의 허용 카테고리에 속하지 않으면 변환을 거부**해야 함 (섹션 6 참고)
 
 #### `examples/` 디렉토리
-- **데모 파일 1개 이상 필수** — 변환물의 핵심 기능을 가장 잘 보여주는 형식을 선택
-  - CLI / 라이브러리 형태의 변환물 → `basic_usage.py` 같은 **독립 실행 가능한 `.py` 스크립트** 권장
-  - 인터랙티브 UI·시각화·단계별 설명이 핵심인 변환물 → `demo.ipynb` 같은 **Jupyter 노트북** 권장 (예: 위젯 기반 UI, 시각화 탐색)
-  - 두 형태를 함께 제공하는 것도 가능하지만, 의무는 아님 — "데모를 가장 잘 보여주는 한 가지"가 우선
-- 학습이 필요한 변환물은 `train.py` (또는 `train.ipynb`) 도 함께 제공
-- `.py` 스크립트는 **독립 실행 가능** 해야 함 (셀 매직 `%%`, `display()` 전용 호출 등 노트북 전용 기능에 의존 금지)
+- 최소 1개의 `basic_usage.py` 필수
+- 학습이 필요한 변환물은 `train.py`도 함께 제공
+- 각 예제 스크립트는 **독립 실행 가능**해야 함 (Jupyter 의존 금지)
 - 예제는 자체 포함 데이터 또는 `../data/` 참조만 사용
 
 #### `data/` 디렉토리 (선택)
@@ -160,7 +169,7 @@ Agent는 다음 하이브리드 플로우로 동작합니다:
 - 공개 표준 데이터셋의 소규모 샘플 또는 합성 데이터 사용
 
 ### 일관성 원칙
-- **기본 구조는 모든 폴더에 적용** (`README.md`, `<main>.py`, `metadata.json`, `LICENSE` 는 필수, `examples/` 안에는 **데모 1개 이상** 필수 — `.py` / `.ipynb` 둘 다 허용)
+- **기본 구조는 모든 폴더에 적용** (`README.md`, `<main>.py`, `metadata.json`, `LICENSE`, `examples/basic_usage.py`는 필수)
 - **필요 시 유연하게 확장 가능**: 예를 들어 configs/, notebooks/, benchmarks/ 등을 추가해도 무방
 - 단, 기본 구조에 있는 파일을 **생략하지는 않음**
 - 확장 디렉토리/파일은 README.md에 간단히 설명 추가
@@ -176,32 +185,50 @@ Agent는 다음 하이브리드 플로우로 동작합니다:
 - 이 때문에 **single-file**이 강력한 가치를 가짐 (리뷰도 쉽고, 반입도 쉬움)
 
 ### 사내 미러에 기대할 수 있는 패키지
-- **허용 가정 (런타임)**: `numpy`, `pandas`, `scipy`, `scikit-learn`, `torch`, `langgraph`
-- **허용 가정 (개발환경)**: `jupyter` / `jupyterlab` / `notebook` / `IPython` / `ipywidgets` — 폐쇄망에서도 노트북은 표준 개발환경이므로 사용 가능. 단, 이들은 **개발·데모용** 이며 single-file 본체는 이들이 없어도 import·실행에 문제가 없도록 작성 (예: `IPython.display` 는 `try/except ImportError` 로 감싸기)
-- **그 외는 모두 "없다"고 가정**하고 구현할 것
-- `langgraph`가 허용되므로, agentic 동작이 필요한 변환물은 LangGraph의 StateGraph 패턴을 활용 가능
+금융사/팀마다 반입 가능한 패키지 목록이 다릅니다. 이 프로젝트는 **환경 스택 정의를 `references/allowed-stacks/` 하위 YAML 파일로 외부화**합니다.
 
-### 데이터 영속화 원칙 (중요)
-폐쇄망 환경에서는 **개발 공간 → 업무 공간 파일 이동 시 보안 심사**를 받습니다. 이 과정에서 다음과 같은 현실적 제약이 있습니다:
+- 현재 활성 스택은 프로젝트 루트의 `active_stack.txt` (또는 명시적 지정)로 결정
+- 각 스택 YAML에는 허용 패키지·금지 패키지·라이선스 정책·Python 버전이 정의됨
+- Agent는 변환 작업 전 **반드시 활성 스택을 읽고** 그 제약 안에서 동작
+- 새 환경에 이식 시 `references/allowed-stacks/` 안에 새 YAML을 추가하면 됨
 
-- **바이너리 DB 파일 반출 불가**: SQLite(`.db`, `.sqlite`), pickle(`.pkl`), parquet 등은 반출이 매우 까다롭거나 불가능
-- **HTML 파일은 반출 허용**: 단, **업무망에서 열었을 때 파일시스템에 접근하는 JavaScript는 동작 불가**
-  - 즉, HTML 내부 JS가 외부 파일을 `fetch` / `XMLHttpRequest`로 읽으려 하면 실패
-  - HTML 하나로 **self-contained(자기완결)** 되어야 함
+자세한 구조는 `references/README.md` 참고.
 
-**따라서 Agent가 생성하는 코드는 다음 원칙을 따라야 합니다:**
+### 활성 스택이 지정되지 않았을 때의 처리 (중요)
+사용자가 매번 환경 정보를 명시하지는 않습니다. 이때 Agent의 행동 규칙:
 
-1. **기록/상태/로그/결과물은 HTML 파일 하나에 통합 저장**
-   - 데이터는 HTML 안에 `<script type="application/json" id="data">...</script>` 형태로 임베드
-   - 시각화/테이블/리포트도 같은 HTML 안에 인라인 (CSS/JS 포함 self-contained)
-2. **외부 파일 의존 금지**
-   - `<link href="style.css">`, `<script src="app.js">`, `fetch('data.json')` 등 **외부 리소스 참조 금지**
-   - 이미지도 필요 시 base64 data URI로 인라인
-3. **SQLite, pickle, parquet 등 바이너리 영속화 포맷 사용 금지**
-   - 대안: 순수 텍스트(JSON, CSV)를 HTML 안에 임베드하거나, 필요 시 독립된 `.csv` 파일로 출력
-4. **HTML 생성은 표준 라이브러리로 충분**
-   - `string.Template`, f-string, 혹은 순수 HTML 템플릿 문자열 사용
-   - Jinja2 같은 외부 템플릿 엔진은 허용 목록에 없으므로 사용 금지
+1. **매 변환 작업 시작 시 활성 스택을 확인**
+   - `active_stack.txt` 존재 여부, 사용자 메시지 내 환경 스펙 여부, 최근 대화의 명시적 지정 여부를 점검
+   - 세션 내에서 이전 작업에 사용한 스택을 **자동 재사용하지 않음** (변환 대상마다 타겟 환경이 다를 수 있음)
+
+2. **지정되지 않았으면 기본 스택을 가정하고 시작**
+   - `references/allowed-stacks/default.yaml`을 기본값으로 사용
+   - 변환 작업을 **중단하지 않음** — 가정을 명시하며 진행
+
+3. **사용자에게 반드시 확인을 요청**
+   - 기본 스택의 **핵심 내용을 구체적으로 제시**: Python 버전, 주요 허용 패키지, 주요 금지 항목
+   - "이대로 진행할까요? 수정이 필요하면 알려주세요"라는 형태로 유도
+   - 목록을 그대로 나열하기보다 **요약 + 필요 시 상세 제공** 방식 권장
+
+4. **사용자 수정사항은 현재 작업에만 반영**
+   - 사용자가 "pandas 버전은 1.3으로 맞춰주세요"라고 하면 **이 변환 작업에만** 적용
+   - 다음 작업에서는 다시 기본 스택 + 확인 절차 반복
+   - 지속적 변경이 필요하면 사용자가 `active_stack.txt`를 수정하도록 안내
+
+**예시 응답 패턴**:
+```
+이 변환 작업의 타겟 환경을 확인하겠습니다. 기본 스택(default.yaml)을 가정하면:
+- Python: 3.9
+- 허용 패키지: numpy, pandas, scipy, scikit-learn, torch, langgraph
+- 라이선스 정책: MIT/Apache-2.0/BSD 계열만 허용
+
+이대로 진행할까요? 타겟 환경이 다르면 (예: Python 3.8, pandas 1.3 고정 등) 알려주세요.
+```
+
+### 데이터 영속화 원칙 (요약)
+폐쇄망 환경에서는 **개발 공간 → 업무 공간 파일 이동 시 보안 심사**를 받습니다. 이 과정에서 바이너리 파일(SQLite, pickle, parquet 등)은 반출이 까다롭거나 불가능하지만, HTML 파일은 self-contained인 경우 반출 가능합니다. 따라서 **기록·상태·결과물은 모두 self-contained HTML로 통합**합니다.
+
+구체적 규칙과 금지 패턴은 섹션 6 "🚫 데이터 영속화 관련" 참고.
 
 ### 사용자 페르소나 고려
 사용자 수준이 다양하므로:
@@ -253,36 +280,84 @@ if __name__ == "__main__":
 2. **원본 출처와 라이선스**: 파일 최상단 docstring에 명시
 3. **한글 주석**: 핵심 로직에 빠짐없이
 
+#### 네이밍 규칙
+- **함수/변수**: `snake_case` (예: `fit_model`, `input_tensor`)
+- **클래스**: `PascalCase` (예: `Segmenter`, `TextClassifier`)
+- **상수**: `UPPER_SNAKE_CASE` (예: `DEFAULT_BATCH_SIZE`)
+- **비공개(internal)**: 앞에 `_` 접두어 (예: `_compute_weights`)
+- **약어 사용 지양**: `img_segmenter` ✅ vs `imseg` ❌
+- **원본 라이브러리의 주요 클래스명은 가급적 유지**하여 사용자가 문서를 찾기 쉽도록 함
+
+#### 에러 처리
+- **명시적 예외 타입 사용**: `except Exception:`이 아니라 `except ValueError:`
+- **무시해도 되는 예외는 주석으로 이유 명시**
+  ```python
+  try:
+      result = compute()
+  except StopIteration:
+      # 이터레이터가 비어있는 경우 기본값 사용 (설계상 정상 경로)
+      result = default_value
+  ```
+- **사용자에게 의미 있는 에러 메시지**: `raise ValueError("input_dim must be > 0, got %d" % dim)`
+- **원본 라이브러리의 예외 계층은 단순화**: 커스텀 예외를 무리하게 이식하지 말고, 표준 예외(`ValueError`, `RuntimeError`, `TypeError`)로 매핑
+
+#### 로깅 vs print
+- **라이브러리성 코드(변환물 본체)**: `logging` 모듈 사용 (`logger = logging.getLogger(__name__)`)
+- **예제 스크립트(`examples/`)**: `print()` 사용 가능 (사용자 눈으로 바로 확인하는 용도이므로)
+- **진행률 표시**: tqdm 등 외부 패키지가 활성 스택에 없으면 `print()` + `\r`로 간단히 구현
+- **디버그 로그 남발 금지**: `logger.debug`는 변환물 사용자가 켜고 끌 수 있도록 남기되, `logger.info`는 정말 사용자가 알아야 할 것만
+
+#### 타입 힌트
+- **공개 API에는 타입 힌트 권장** (사용자가 읽기 편함)
+- **내부 헬퍼 함수는 선택**
+- **타입 힌트 호환성은 활성 스택의 Python 버전에 맞춤** (3.9 이하면 `from __future__ import annotations` 또는 `typing.List` 사용)
+
 ---
 
 ## 6. 금지사항 (DO NOT)
 
 ### 🚫 외부 의존성 관련
-- **허용 외 패키지 import 금지**
-  - ✅ 허용 (런타임): `numpy`, `pandas`, `scipy`, `scikit-learn`, `torch`, `langgraph`, Python 표준 라이브러리
-  - ✅ 허용 (개발·데모 전용): `jupyter`/`jupyterlab`/`notebook`/`IPython`/`ipywidgets` — 노트북 기반 데모·인터랙티브 UI에만 사용, single-file 본체가 이들에 **강제 의존** 하면 안 됨 (없어도 import/실행 가능하도록 optional 처리)
-  - ❌ 금지: 위 목록에 없는 모든 외부 패키지 (transformers, langchain, openai, anthropic, requests 등)
+- **활성 스택에 정의되지 않은 패키지 import 금지**
+  - 허용 목록은 `references/allowed-stacks/<active>.yaml`의 `allowed_packages` 참고
+  - 금지 목록(참고용 비망록)은 같은 파일의 `blocked_packages` 참고
+  - 확신이 서지 않으면 활성 스택 YAML을 먼저 확인
 - **`pip install`, `conda install` 등 런타임 설치 명령 포함 금지**
 
 ### 🚫 네트워크 관련
 - **외부 인터넷 호출 코드 포함 금지**
-  - `requests`, `urllib`, `httpx`, `aiohttp` 등 네트워크 라이브러리 사용 금지
+  - HTTP 클라이언트 라이브러리 사용 금지 (구체 목록은 활성 스택 YAML의 `blocked_packages` 참고)
   - 외부 URL에서 모델/데이터를 다운로드하는 코드 금지 (`from_pretrained("http://...")` 같은 패턴)
   - 원격 telemetry, 로깅 서버 전송 코드 금지
 - **소켓/포트 오픈 코드 금지** (Agent가 만든 single-file에 한함)
 
 ### 🚫 데이터 영속화 관련
-(자세한 원칙은 섹션 4의 "데이터 영속화 원칙" 참고)
-- **SQLite, pickle, parquet, feather, HDF5 등 바이너리 포맷으로 저장하는 코드 금지**
-- **외부 파일을 참조하는 HTML 금지**: `fetch()`, `XMLHttpRequest`, `<link href="...">`, `<script src="...">` 모두 금지
-- **HTML은 반드시 self-contained**: 데이터·CSS·JS·이미지(base64) 모두 인라인
-- **기록/로그/결과물은 HTML 하나로 통합**하는 것을 원칙으로 함
+(배경과 맥락은 섹션 4의 "데이터 영속화 원칙 (요약)" 참고)
+
+**반드시 지켜야 할 규칙:**
+
+1. **바이너리 포맷으로 저장하는 코드 금지**
+   - 구체 금지 목록은 활성 스택 YAML의 `blocked_persistence_formats` 참고
+   - 일반적으로 SQLite(`.db`, `.sqlite`), pickle(`.pkl`), parquet, feather, HDF5 등
+2. **외부 파일을 참조하는 HTML 금지**
+   - 금지 패턴: `fetch()`, `XMLHttpRequest`, `<link href="...">`, `<script src="...">`
+   - 이미지도 `<img src="file.png">` 금지 → base64 data URI로 인라인
+3. **HTML은 반드시 self-contained**
+   - 데이터: `<script type="application/json" id="data">...</script>` 형태로 임베드
+   - CSS: `<style>` 태그 안에 인라인
+   - JS: `<script>` 태그 안에 인라인
+   - 이미지: base64 data URI
+4. **기록/로그/결과물은 HTML 하나로 통합**
+   - 시각화·테이블·리포트를 별도 파일로 분리하지 않음
+   - 대안이 필요하면 순수 텍스트(JSON, CSV)로만 분리
+5. **HTML 생성은 표준 라이브러리 또는 활성 스택 내 도구로**
+   - `string.Template`, f-string, 순수 HTML 템플릿 문자열 사용
+   - 외부 템플릿 엔진(Jinja2 등)은 활성 스택에 명시되지 않은 이상 금지
 
 ### 🚫 라이선스 관련
-- **GPL / AGPL / LGPL 계열 라이선스 코드 차용 금지**
+- **활성 스택의 `license_policy.blocked_categories`에 해당하는 라이선스 코드 차용 금지**
   - 해당 라이선스 오픈소스를 발견하면 **변환 중단하고 사용자에게 알림**
-  - 대안: MIT, Apache-2.0, BSD 계열 라이브러리를 우선 탐색
-- 라이선스를 확인할 수 없는 경우, 변환 대신 **사용자 확인 요청**
+  - 대안: `license_policy.allowed_categories` 중에서 우선 탐색
+- 라이선스를 확인할 수 없는 경우, 활성 스택의 `license_policy.on_unknown` 정책 따름
 
 ### 🚫 프롬프트 복잡도 관련
 로컬 LLM(상대적으로 제한된 reasoning 능력)을 쓰는 환경을 전제로 합니다.
@@ -290,7 +365,7 @@ if __name__ == "__main__":
 - **한 프롬프트에 너무 많은 제약/예시 투입 금지** (토큰 낭비 + 품질 저하)
 - 복잡한 작업은 **여러 step으로 분해** (한 프롬프트에 모든 걸 담지 말 것)
 - 프롬프트 템플릿은 **간결하고 명시적**으로. 암시적/추상적 표현 지양
-- `langgraph` 사용 시: 노드는 **단일 책임 원칙**을 지키고, state 스키마를 최소화. 과도하게 분기된 그래프는 로컬 LLM에서 디버깅이 어려움
+- Agentic workflow 구현 시: 노드는 **단일 책임 원칙**을 지키고, state 스키마를 최소화. 과도하게 분기된 그래프는 로컬 LLM에서 디버깅이 어려움
 
 ### 🚫 기타
 - 개인정보/금융정보가 예제에 포함되지 않도록 주의
@@ -324,12 +399,31 @@ if __name__ == "__main__":
 
 ---
 
-## 8. Agent가 지켜야 할 행동 원칙 (요약)
+## 8. 사용 가능한 Skills
+
+이 프로젝트에서는 재사용 가능한 기능 단위를 `skills/` 폴더에 Skill 문서로 관리합니다. 각 Skill의 상세 동작·입력·워크플로우는 해당 SKILL.md를 참조합니다.
+
+### 등록된 Skills
+
+| Skill | 경로 | 언제 쓰는가 |
+|---|---|---|
+| `environment-adapter` | `skills/environment-adapter/SKILL.md` | 타겟 환경(Dockerfile, requirements.txt 등)에 맞춰 변환물 코드를 조정할 때 |
+
+### Skill 추가 규칙
+- 새 Skill은 `skills/<skill-name>/SKILL.md` 형태로 추가 (`<skill-name>`은 kebab-case 영문)
+- SKILL.md는 **YAML frontmatter (`name`, `description`) 필수**
+- `description`은 "무엇을 하는지"와 "언제 트리거할지"를 모두 담을 것 (Skill 트리거의 기반)
+- 본문은 500줄 미만을 목표로. 큰 참조 자료는 `references/` 아래로 분리
+
+---
+
+## 9. Agent가 지켜야 할 행동 원칙 (요약)
 
 1. **모르면 구현하지 말고 묻는다.** 추측으로 코드를 만들지 않는다.
-2. **한 파일, 한 목적.** 여러 기능을 한 파일에 욱여넣지 않는다.
-3. **한 폴더, 한 변환물.** 번호 기반 폴더로 독립 관리하며 기본 구조를 유지한다.
-4. **의존성은 적을수록 선(善).** 허용 목록을 넘으면 대안을 찾는다.
-5. **사용자는 다양하다.** 가장 초급 사용자를 기준으로 설명한다.
-6. **불확실성은 명시한다.** "아마도"는 코드가 아니라 주석에 쓴다.
-7. **영속화는 HTML로.** 바이너리 파일은 반출되지 않는다. 기록은 self-contained HTML에 담는다.
+2. **매 작업마다 스택을 확인한다.** 이전 작업의 가정을 재사용하지 않는다. 지정되지 않으면 기본 스택을 제시하고 확인을 구한다.
+3. **한 파일, 한 목적.** 여러 기능을 한 파일에 욱여넣지 않는다.
+4. **한 폴더, 한 변환물.** 번호 기반 폴더로 독립 관리하며 기본 구조를 유지한다.
+5. **의존성은 적을수록 선(善).** 허용 목록을 넘으면 대안을 찾는다.
+6. **사용자는 다양하다.** 가장 초급 사용자를 기준으로 설명한다.
+7. **불확실성은 명시한다.** "아마도"는 코드가 아니라 주석에 쓴다.
+8. **영속화는 HTML로.** 바이너리 파일은 반출되지 않는다. 기록은 self-contained HTML에 담는다.
