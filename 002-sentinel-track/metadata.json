@@ -10,20 +10,21 @@
   },
   "converted_at": "2026-04-18",
   "agent_version": "0.1.0",
-  "dependencies_used": ["psutil", "torch (선택, GPU 감지 시)"],
+  "dependencies_used": ["psutil", "torch (선택, GPU mem)", "nvidia-smi CLI (선택, 전력/온도)"],
   "extracted_features": [
     "wandb 공개 API 표면 shim (init / log / finish / config / run / Table / define_metric)",
     "import sentinel_track as wandb 한 줄로 HuggingFace Trainer(report_to='wandb') 자동 후킹 — sys.modules['wandb'] 치환",
-    "백그라운드 스레드 기반 시스템 메트릭 수집 (CPU per-core, RAM, GPU util/mem — psutil + torch.cuda)",
+    "백그라운드 스레드 기반 시스템 메트릭 수집 (CPU per-core, RAM, GPU mem — psutil + torch.cuda)",
+    "GPU 전력/온도/팬/사용률/총VRAM 수집 (nvidia-smi CSV 파싱, 미설치 시 첫 시도 후 자동 비활성화)",
     "Run 단위 JSONL 이벤트 저장 (사내 반입 정책: 바이너리 포맷 없음)",
-    "self-contained 대시보드 HTML (Runs 목록 + Run 상세 + Sweep view), 순수 SVG 렌더",
+    "self-contained 대시보드 HTML (Runs 목록 + Run 상세 + Sweep view), 순수 SVG 렌더, GPU 메트릭 색상 분류 (전력=주황, 온도=빨강, 팬=보라)",
     "wandb.Table 호환 — 대시보드에서 정렬 가능 HTML 테이블로 렌더"
   ],
   "limitations": [
     "wandb.Image / wandb.Video / wandb.Artifact 등 리치 미디어는 구현하지 않음 (기본 메트릭 + Table 만)",
     "여러 프로세스에서 동시 wandb.init 호출 시 run 격리는 process 단위로만 지원 (분산 학습은 rank 0만 로깅 권장)",
     "Sweep 실행 오케스트레이션은 포함하지 않음 — sweep view는 이미 끝난 run들의 config 비교 시각화만 제공",
-    "GPU 메트릭은 torch.cuda 기반 (메모리·utilization). nvidia-smi 파싱이나 온도/전력은 미지원",
+    "GPU 메트릭 소스: torch.cuda (mem_alloc/reserved) + nvidia-smi (power/temperature/fan/util/total). NVML(pynvml)은 허용 스택 외라 미사용 — SM clock 같은 NVML 전용 메트릭은 미수집",
     "대시보드는 실행이 끝난 run들의 스냅샷 HTML. 실시간 라이브 모니터링 UI는 제공하지 않음"
   ]
 }
