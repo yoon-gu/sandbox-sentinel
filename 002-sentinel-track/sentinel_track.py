@@ -40,8 +40,10 @@ import math
 import os
 import pathlib
 import random
+import shutil
 import socket
 import string
+import subprocess
 import sys
 import threading
 import time
@@ -120,12 +122,84 @@ def _json_safe(obj: Any) -> Any:
 
 # ===== 3. 시스템 메트릭 수집기 =====
 
+# nvidia-smi 쿼리 컬럼. CSV(noheader, nounits)로 안정적이고 드라이버 설치된 어디서나 동작.
+# pynvml 같은 외부 패키지가 허용 스택에 없으므로 subprocess 가 정답.
+_NVSMI_FIELDS: Tuple[str, ...] = (
+    "index",
+    "power.draw",          # 현재 전력 (W)
+    "power.limit",         # 전력 상한 (W)
+    "temperature.gpu",     # GPU 코어 온도 (°C)
+    "fan.speed",           # 팬 속도 (%)
+    "utilization.gpu",     # GPU 사용률 (%)
+    "utilization.memory",  # 메모리 컨트롤러 사용률 (%)
+    "memory.used",         # 사용 메모리 (MiB)
+    "memory.total",        # 총 메모리 (MiB)
+)
+
+
+def _nvsmi_query() -> Optional[List[Dict[str, Any]]]:
+    """nvidia-smi 1회 호출 → idx 별 dict 리스트. 미설치/실패 시 None.
+
+    drivers/CUDA 가 없는 환경에서 매번 subprocess 비용이 들지 않도록 호출자는 결과를
+    캐시해야 합니다 (`_NvidiaSmi` 참고).
+    """
+    if not shutil.which("nvidia-smi"):
+        return None
+    query = ",".join(_NVSMI_FIELDS)
+    try:
+        proc = subprocess.run(
+            ["nvidia-smi", f"--query-gpu={query}", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=3.0, check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    out: List[Dict[str, Any]] = []
+    for line in proc.stdout.splitlines():
+        cols = [c.strip() for c in line.split(",")]
+        if len(cols) != len(_NVSMI_FIELDS):
+            continue
+        row: Dict[str, Any] = {}
+        for name, raw in zip(_NVSMI_FIELDS, cols):
+            # nvidia-smi 는 미지원 필드에 "[Not Supported]" 같은 값을 반환. 숫자만 채택.
+            if raw in ("", "[Not Supported]", "[N/A]", "N/A"):
+                continue
+            try:
+                num = float(raw)
+            except ValueError:
+                continue
+            row[name] = num
+        if "index" in row:
+            row["index"] = int(row["index"])
+            out.append(row)
+    return out or None
+
+
+class _NvidiaSmi:
+    """nvidia-smi 가용성을 확인 후 캐싱. 미설치 환경에서는 첫 1회만 시도."""
+    def __init__(self) -> None:
+        self._available: Optional[bool] = None
+
+    def sample(self) -> List[Dict[str, Any]]:
+        if self._available is False:
+            return []
+        rows = _nvsmi_query()
+        if rows is None:
+            self._available = False
+            return []
+        self._available = True
+        return rows
+
+
 class _SystemMonitor:
     """
     백그라운드 스레드로 CPU·RAM·GPU 메트릭을 주기 샘플링해 system.jsonl 에 적재.
 
     - CPU: psutil 프로세스 CPU %, per-core 시스템 CPU %, RAM 사용량/%
-    - GPU: torch.cuda 가 있으면 device 별 memory_allocated / utilization
+    - GPU (torch): torch.cuda 가 있으면 device 별 memory_allocated/reserved, util_percent
+    - GPU (nvidia-smi): 드라이버가 있으면 power_w, power_limit_w, temperature_c, fan_percent,
+      mem_used_mb, mem_total_mb (torch 가 없어도 동작)
     - 아무것도 없으면 조용히 빈 샘플만 남김 (예외로 학습 중단 금지)
     """
 
@@ -135,6 +209,7 @@ class _SystemMonitor:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._process = _psutil.Process(os.getpid()) if _psutil is not None else None
+        self._nvsmi = _NvidiaSmi()
         # 첫 호출은 0을 반환하므로 초기 warm-up
         if self._process is not None:
             try:
@@ -181,15 +256,16 @@ class _SystemMonitor:
             except Exception:
                 pass
         # --- GPU ---
-        gpu_list: List[Dict[str, Any]] = []
+        # idx → 부분 정보 dict 로 모은 다음, torch.cuda 와 nvidia-smi 결과를 병합.
+        gpus: Dict[int, Dict[str, Any]] = {}
         if _torch is not None and hasattr(_torch, "cuda") and _torch.cuda.is_available():
             try:
                 for i in range(_torch.cuda.device_count()):
-                    g: Dict[str, Any] = {"idx": i}
+                    g: Dict[str, Any] = gpus.setdefault(i, {"idx": i})
                     try:
                         g["name"] = _torch.cuda.get_device_name(i)
                     except Exception:
-                        g["name"] = f"cuda:{i}"
+                        g.setdefault("name", f"cuda:{i}")
                     try:
                         g["mem_alloc_mb"] = round(
                             _torch.cuda.memory_allocated(i) / (1024 * 1024), 2
@@ -199,18 +275,40 @@ class _SystemMonitor:
                         )
                     except Exception:
                         pass
-                    # utilization 은 최신 torch(>=2.1)에서만 제공
+                    # torch.cuda.utilization 은 >=2.1 에서만 제공. nvidia-smi 가 있으면 그쪽으로 덮어씀.
                     util_fn = getattr(_torch.cuda, "utilization", None)
                     if callable(util_fn):
                         try:
                             g["util_percent"] = float(util_fn(i))
                         except Exception:
                             pass
-                    gpu_list.append(g)
             except Exception:
                 pass
-        if gpu_list:
-            sample["gpu"] = gpu_list
+
+        # nvidia-smi: 전력/온도/팬/전체 메모리/사용률
+        for row in self._nvsmi.sample():
+            i = int(row["index"])
+            g = gpus.setdefault(i, {"idx": i})
+            if "power.draw" in row:
+                g["power_w"] = round(row["power.draw"], 2)
+            if "power.limit" in row:
+                g["power_limit_w"] = round(row["power.limit"], 2)
+            if "temperature.gpu" in row:
+                g["temperature_c"] = round(row["temperature.gpu"], 1)
+            if "fan.speed" in row:
+                g["fan_percent"] = round(row["fan.speed"], 1)
+            # nvidia-smi 의 utilization 은 더 정확한 sampling 결과라 torch 보다 우선
+            if "utilization.gpu" in row:
+                g["util_percent"] = round(row["utilization.gpu"], 1)
+            if "utilization.memory" in row:
+                g["mem_util_percent"] = round(row["utilization.memory"], 1)
+            if "memory.used" in row:
+                g["mem_used_mb"] = round(row["memory.used"], 1)
+            if "memory.total" in row:
+                g["mem_total_mb"] = round(row["memory.total"], 1)
+
+        if gpus:
+            sample["gpu"] = [gpus[i] for i in sorted(gpus)]
         return sample
 
     def _run(self) -> None:
@@ -715,14 +813,20 @@ def _load_run(run_dir: pathlib.Path) -> Optional[Dict[str, Any]]:
             sys_series.setdefault("proc_ram_mb", []).append((t, float(s["proc_ram_mb"])))
         for g in s.get("gpu") or []:
             idx = g.get("idx", 0)
-            if "mem_alloc_mb" in g:
-                sys_series.setdefault(f"gpu{idx}_mem_alloc_mb", []).append(
-                    (t, float(g["mem_alloc_mb"]))
-                )
-            if "util_percent" in g:
-                sys_series.setdefault(f"gpu{idx}_util_percent", []).append(
-                    (t, float(g["util_percent"]))
-                )
+            for src_key, dst_suffix in (
+                ("mem_alloc_mb", "mem_alloc_mb"),
+                ("mem_reserved_mb", "mem_reserved_mb"),
+                ("mem_used_mb", "mem_used_mb"),
+                ("util_percent", "util_percent"),
+                ("mem_util_percent", "mem_util_percent"),
+                ("power_w", "power_w"),
+                ("temperature_c", "temperature_c"),
+                ("fan_percent", "fan_percent"),
+            ):
+                if src_key in g:
+                    sys_series.setdefault(f"gpu{idx}_{dst_suffix}", []).append(
+                        (t, float(g[src_key]))
+                    )
 
     return {
         "meta": meta,
@@ -1265,11 +1369,14 @@ _DASHBOARD_JS = r"""
       sysKeys.forEach(k => {
         const chart = el("div", {class: "chart"});
         chart.appendChild(el("h3", {text: k + "  (x: 경과 초)"}));
-        lineChart(chart, [{
-          name: k,
-          color: k.startsWith("gpu") ? "#f472b6" : (k.startsWith("cpu") ? "#38bdf8" : "#34d399"),
-          points: r.system[k]
-        }]);
+        let color;
+        if (k.includes("temperature")) color = "#ef4444";        // 빨강
+        else if (k.includes("power")) color = "#fb923c";          // 주황
+        else if (k.includes("fan")) color = "#a78bfa";            // 보라
+        else if (k.startsWith("gpu")) color = "#f472b6";          // 분홍 (mem/util)
+        else if (k.startsWith("cpu")) color = "#38bdf8";          // 파랑
+        else color = "#34d399";                                    // 초록 (RAM 등)
+        lineChart(chart, [{name: k, color: color, points: r.system[k]}]);
         grid3.appendChild(chart);
       });
       sysCard.appendChild(grid3);

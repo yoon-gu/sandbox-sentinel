@@ -14,7 +14,7 @@
 ## 기능 요약
 
 - **wandb drop-in**: 학습 스크립트 최상단에 `import sentinel_track as wandb` 한 줄만 추가하면 끝. 내부적으로 `sys.modules["wandb"]` 를 이 모듈로 치환해 HuggingFace `transformers.integrations.WandbCallback` 이 자동으로 우리 shim 을 사용합니다. **기존 학습 코드 수정 없음** (`report_to="wandb"` 그대로).
-- **시스템 메트릭 자동 수집**: 백그라운드 스레드가 CPU (per-core + 프로세스), RAM, GPU (torch.cuda 기반 memory/utilization) 를 2초 간격으로 샘플링.
+- **시스템 메트릭 자동 수집**: 백그라운드 스레드가 CPU (per-core + 프로세스), RAM, GPU 를 2초 간격으로 샘플링. GPU 메트릭은 두 소스를 머지 — `torch.cuda` 에서 `mem_alloc/reserved`, `nvidia-smi` 에서 **전력 (W)**, **온도 (°C)**, **팬 속도 (%)**, GPU/메모리 사용률, 사용/총 VRAM. `torch` 가 없어도 nvidia-smi 만 있으면 동작.
 - **Run 당 JSONL 적재**: `./sentinel_runs/<run_id>/` 밑에 `meta.json / events.jsonl / system.jsonl / tables.jsonl`. **바이너리 포맷 일절 없음** — SQLite/pickle/parquet 쓰지 않음 (폐쇄망 반출 정책 준수).
 - **self-contained HTML 대시보드**: `python -m sentinel_track dashboard` 로 모든 run 을 임베드한 HTML 한 장을 생성. 외부 `<script src>` / `<link href>` / `fetch()` 없음, Chart.js 같은 외부 라이브러리도 쓰지 않음 — 순수 인라인 SVG + vanilla JS. **업무망에서 file:// 로 바로 열림.**
 - **탭 3종**:
@@ -30,7 +30,8 @@
 |---|---|---|
 | 필수 | Python 표준 라이브러리 | JSON, threading, HTML 템플릿 |
 | 필수(권장) | `psutil` | CPU / RAM 메트릭. 미설치 시 관련 필드가 빈 값으로 기록됨 |
-| 선택 | `torch` | GPU (CUDA) 메트릭. CPU-only 환경이면 자동 skip |
+| 선택 | `torch` | GPU (CUDA) 의 mem_alloc/reserved 메트릭. CPU-only 환경이면 자동 skip |
+| 선택 | `nvidia-smi` (CLI) | GPU 전력/온도/팬/사용률 — NVIDIA 드라이버 설치되면 자동 사용. 미설치 시 첫 시도 후 캐시 |
 | 선택 | `transformers` | `hf_trainer_demo.py` 를 실제로 돌릴 때만. 본체 import 와는 무관 |
 
 > `numpy`, `pandas` 는 본체 기능에 필요하지 않습니다. `wandb.Table(dataframe=df)` 를 쓸 때만 pandas 가 필요합니다.
@@ -137,7 +138,7 @@ open dashboard.html
 - **리치 미디어 미지원**: `wandb.Image`, `wandb.Video`, `wandb.Artifact`, `wandb.Histogram` 은 구현하지 않았습니다. 이미지가 필요하면 별도 PNG 로 저장 후 링크만 Table 에 넣으세요. 단, 폐쇄망 반출 정책상 가급적 이미지는 피하는 편이 좋습니다.
 - **분산 학습**: 여러 프로세스(rank) 에서 동시에 `wandb.init` 을 호출하면 각각 별도 run 으로 기록됩니다. rank 0 에서만 로깅하도록 HF `args.report_to` 를 조건부로 세팅하는 일반적 패턴을 그대로 따르세요.
 - **Sweep 오케스트레이션 없음**: wandb 의 sweep agent 기능은 제공하지 않습니다. Sweep 탭은 "이미 끝난 여러 run 의 config × summary 비교 뷰" 만 제공합니다. 탐색 실행 자체는 사용자가 루프로 돌려 주세요.
-- **GPU 메트릭 범위**: `torch.cuda.memory_*` / `torch.cuda.utilization()` 만 사용합니다 (torch>=2.1 권장). nvidia-smi 파싱 / 전력 / 온도는 미구현.
+- **GPU 메트릭 범위**: `torch.cuda.memory_*` (mem_alloc/reserved) + `nvidia-smi --query-gpu` (power.draw, temperature.gpu, fan.speed, utilization.gpu/memory, memory.used/total). `nvidia-smi` 가 미설치인 환경에서는 첫 시도에서 자동 비활성화되며 학습은 영향받지 않음. 더 정밀한 NVML 메트릭(SM clock, power.management 모드 등)은 미수집.
 - **라이브 모니터링 아님**: 대시보드 HTML 은 **스냅샷**입니다. 학습 진행 중 실시간 갱신이 필요하면 학습 끝난 뒤 다시 `build_dashboard` 를 호출하세요 (JSONL 은 append-only 라 중간에 호출해도 안전).
 - **wandb API 호환 범위는 "HF Trainer 가 쓰는 것" 중심**: wandb 의 모든 구석까지 채우지 않았습니다. 쓰지 않는 메서드는 대부분 no-op 이며, 프로젝트 요구에 따라 `sentinel_track.py` 에 직접 추가하세요 (single-file 이라 편집이 간단합니다).
 - **transformers import 순서 주의**: `import sentinel_track` 을 `from transformers import ...` 보다 **먼저** 하세요. 순서가 뒤바뀌면 transformers 가 기동 시 `find_spec("wandb")` 결과를 캐시해 버려 우리 shim 이 탐지되지 않을 수 있습니다.
