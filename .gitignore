@@ -212,6 +212,10 @@ sentinel_runs_demo/
 dashboard.html
 hf_out/
 
+# datahub-lite 생성/임포트 아티팩트 — 실 DataHub 메타데이터(사내 자산명·태그·소유자 등)가
+# 들어갈 수 있어 절대 커밋 금지. 데모는 examples/*.py 실행으로 재생성.
+003-datahub-lite/data/
+
 # OS generated files
 #  macOS
 .DS_Store

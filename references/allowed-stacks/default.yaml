@@ -1,0 +1,69 @@
+# 기본 환경 스택 정의 (active_stack.txt가 이 파일을 가리킴)
+#
+# 이 스택은 "사내 미러에 일반적으로 등록되어 있다고 가정해도 괜찮은" 최소 공통 집합입니다.
+# 실제 운영 환경이 다르면 같은 디렉토리에 새 YAML을 추가하고 active_stack.txt를 변경하세요.
+
+name: default
+description: |
+  데이터 사이언스/분석 베이스라인. Python 3.9 기준의 표준 패키지와
+  PyTorch + LangGraph 만 추가로 가정합니다.
+python: "3.9"
+
+allowed_packages:
+  # 표준 라이브러리는 항상 허용 (별도 명시 불필요)
+  - numpy
+  - scipy
+  - pandas
+  - scikit-learn
+  - matplotlib
+  - torch
+  - langgraph
+  - psutil               # 2026-04-18 추가 (시스템 리소스 모니터링)
+
+  # export 단계 한정 패키지 (런타임 코어에는 import 금지, examples/export_*.py 에서만 허용)
+  # 변환 작업의 본체 코드는 이 패키지에 의존하지 않아야 함
+  - acryl-datahub        # DataHub 메타데이터 emit 용 (003-datahub-lite 의 export 경로)
+
+blocked_packages:
+  # HTTP 클라이언트 (외부 통신 차단)
+  - requests
+  - httpx
+  - aiohttp
+  - urllib3              # 단, 표준 라이브러리 urllib 은 사용 가능
+  # 바이너리 영속화
+  - pyarrow              # parquet/feather (HTML 영속화 원칙 위배)
+  - fastparquet
+  - h5py
+  - tables               # pytables / HDF5
+  # 외부 템플릿 엔진 (string.Template/f-string으로 충분)
+  - jinja2
+
+blocked_persistence_formats:
+  # 파일 확장자 단위로 영속화 금지 포맷을 정의
+  - .pkl
+  - .pickle
+  - .db
+  - .sqlite
+  - .sqlite3
+  - .parquet
+  - .feather
+  - .h5
+  - .hdf5
+  - .arrow
+
+license_policy:
+  allowed_categories:
+    - MIT
+    - Apache-2.0
+    - BSD-2-Clause
+    - BSD-3-Clause
+    - ISC
+    - PSF-2.0
+  blocked_categories:
+    - GPL-2.0
+    - GPL-3.0
+    - AGPL-3.0
+    - LGPL-3.0          # 정적 링크 시 GPL 전이 우려가 있어 보수적 차단
+    - SSPL-1.0
+    - BUSL-1.1
+  on_unknown: ask        # ask | block | allow
