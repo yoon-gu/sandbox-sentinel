@@ -73,9 +73,10 @@ Agent는 다음 하이브리드 플로우로 동작합니다:
 │       ├── torch.yaml
 │       ├── python-syntax.yaml
 │       └── package-substitutions.yaml
-├── skills/                      # Claude Code가 사용하는 Skill 문서
-│   └── environment-adapter/
-│       └── SKILL.md             # 환경 호환성 조정 Skill
+├── .claude/
+│   └── skills/                  # Claude Code가 자동 로드하는 프로젝트 Skill
+│       └── environment-adapter/
+│           └── SKILL.md         # 환경 호환성 조정 Skill
 ├── 001-image-segmentation/      # 변환물 #1
 ├── 002-text-classification/     # 변환물 #2
 ├── 003-anomaly-detection/       # 변환물 #3
@@ -401,19 +402,20 @@ if __name__ == "__main__":
 
 ## 8. 사용 가능한 Skills
 
-이 프로젝트에서는 재사용 가능한 기능 단위를 `skills/` 폴더에 Skill 문서로 관리합니다. 각 Skill의 상세 동작·입력·워크플로우는 해당 SKILL.md를 참조합니다.
+이 프로젝트에서는 재사용 가능한 기능 단위를 `.claude/skills/` 폴더에 **프로젝트 Skill**로 등록하여 관리합니다. 이 경로는 Claude Code가 자동으로 로드하는 공식 Skill 경로이며, 리포를 clone한 모든 사용자가 `/skills` 명령으로 즉시 사용할 수 있습니다. (리포 최상단의 `skills/` 폴더는 Claude Code가 로드하지 않으므로 사용하지 않습니다.)
 
 ### 등록된 Skills
 
 | Skill | 경로 | 언제 쓰는가 |
 |---|---|---|
-| `environment-adapter` | `skills/environment-adapter/SKILL.md` | 타겟 환경(Dockerfile, requirements.txt 등)에 맞춰 변환물 코드를 조정할 때 |
+| `environment-adapter` | `.claude/skills/environment-adapter/SKILL.md` | 타겟 환경(Dockerfile, requirements.txt 등)에 맞춰 변환물 코드를 조정할 때 |
 
 ### Skill 추가 규칙
-- 새 Skill은 `skills/<skill-name>/SKILL.md` 형태로 추가 (`<skill-name>`은 kebab-case 영문)
+- 새 Skill은 `.claude/skills/<skill-name>/SKILL.md` 형태로 추가 (`<skill-name>`은 kebab-case 영문)
 - SKILL.md는 **YAML frontmatter (`name`, `description`) 필수**
 - `description`은 "무엇을 하는지"와 "언제 트리거할지"를 모두 담을 것 (Skill 트리거의 기반)
 - 본문은 500줄 미만을 목표로. 큰 참조 자료는 `references/` 아래로 분리
+- Claude Code 세션에서 `/skills`로 Skill이 목록에 뜨는지 확인
 
 ---
 
