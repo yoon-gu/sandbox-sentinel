@@ -17,7 +17,7 @@
     "self-contained HTML trace 뷰어 (외부 리소스/JS fetch 없음)",
     "Jupyter 노트북에서 IPython.display로 인라인 렌더 + 외부 파일 저장 모두 지원",
     "외부 네트워크/transformers 의존 없는 MockLLM (워크플로 시연용)",
-    "Human-in-the-loop: LLM 이 ask_user 를 반환하면 langgraph.types.interrupt() 로 일시정지하고, chat_ui 가 주관식(Textarea)/객관식(RadioButtons) UI 로 자동 전환 — resume(answer) 로 그래프 재개"
+    "Human-in-the-loop: LLM 이 ask_user 를 반환하면 langgraph.types.interrupt() 로 일시정지하고, chat_ui 가 주관식(Textarea)/객관식(RadioButtons)/복수선택(Checkbox 그룹) UI 로 자동 전환 — resume(answer) 로 그래프 재개"
   ],
   "limitations": [
     "MockLLM은 실제 언어모델이 아닌 에코-스타일 시뮬레이터입니다. 사내 실제 LLM 어댑터로 교체해야 의미 있는 응답이 나옵니다.",

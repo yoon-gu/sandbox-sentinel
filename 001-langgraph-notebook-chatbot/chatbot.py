@@ -209,7 +209,7 @@ class MockLLM:
                 break
         if prev_ask:
             qtype = prev_ask.get("type", "input")
-            tag = "객관식" if qtype == "choice" else "주관식"
+            tag = {"choice": "객관식", "multi_choice": "복수선택"}.get(qtype, "주관식")
             text = (
                 f"[턴 {turn}] ({tag} 응답 수신) "
                 f"사용자 답변 '{str(last_user)[:60]}' 을(를) 반영해 다음 단계를 진행합니다."
@@ -224,6 +224,24 @@ class MockLLM:
             return self._finalize(text, messages)
 
         # ---- HITL 트리거: LLM 이 스스로 사용자에게 되묻기로 결정 ----
+        # 복수선택(multi_choice) 유도 키워드 — 먼저 검사 (객관식보다 더 구체적인 패턴)
+        if any(k in last_user for k in ("여러", "복수", "해당", "체크", "모두")):
+            question = "관심 있는 항목을 **모두** 체크해주세요."
+            options = [
+                "주식",
+                "채권",
+                "부동산",
+                "현금성 자산",
+                "대체투자 (원자재/헤지펀드)",
+            ]
+            reply, ti, to = self._finalize(question, messages)
+            reply["ask_user"] = {
+                "type": "multi_choice",
+                "question": question,
+                "options": options,
+            }
+            return reply, ti, to
+
         # 객관식 유도 키워드
         if any(k in last_user for k in ("추천", "고를", "고르", "골라", "선택지", "옵션")):
             question = "아래 중 어떤 방향이 좋을까요?"
@@ -344,7 +362,12 @@ def _human_node(state: ChatState, config) -> dict:
         ) as s:
             tracer.finish(s, outputs={"answer": answer})
 
-    user_msg = {"role": "user", "content": str(answer)}
+    # multi_choice 의 경우 answer 가 list/tuple 로 들어온다 — 대화 풍선에는 ", " 로 합쳐 표시
+    if isinstance(answer, (list, tuple)):
+        content = ", ".join(str(a) for a in answer) if answer else "(선택 없음)"
+    else:
+        content = str(answer)
+    user_msg = {"role": "user", "content": content}
     return {"messages": [user_msg], "pending_ask": None}
 
 
@@ -442,7 +465,8 @@ class Chatbot:
     def resume(self, answer: Any) -> str:
         """`pending_interrupt` 를 사용자 답변(`answer`) 으로 해소하고 그래프를 재개한다.
 
-        - 주관식(type=input) 이면 임의의 문자열, 객관식(type=choice) 이면 options 중 하나.
+        - 주관식(type=input) 이면 임의의 문자열, 객관식(type=choice) 이면 options 중 하나,
+          복수선택(type=multi_choice) 이면 options 의 부분집합 list.
         - 재개 후에도 LLM 이 다시 되묻기로 결정하면 `pending_interrupt` 가 또 채워질 수 있다.
         """
         if self.pending_interrupt is None:
@@ -541,6 +565,7 @@ class Chatbot:
 
         - **주관식(type=input)** → Textarea + "답변 제출" 버튼
         - **객관식(type=choice)** → RadioButtons + "답변 제출" 버튼
+        - **복수선택(type=multi_choice)** → 여러 Checkbox + "답변 제출" 버튼 (체크한 항목들을 list 로 resume)
 
         제출하면 `resume(answer)` 를 호출해 그래프를 이어가고, 필요시 다시 되묻기 UI 로
         전환됩니다. 모든 동작은 셀 하나의 output 안에서 완결됩니다.
@@ -626,6 +651,8 @@ class Chatbot:
             qtype = (payload or {}).get("type", "input")
             question = (payload or {}).get("question", "사용자 응답이 필요합니다.")
 
+            tag = {"choice": "객관식", "multi_choice": "복수선택"}.get(qtype, "주관식")
+
             # 질문 배너 — 노란색 강조로 "LLM 이 되묻는 중" 을 시각화
             banner = W.HTML(value=(
                 f"<div style='background:#fef3c7;border:1px solid #fcd34d;"
@@ -633,14 +660,54 @@ class Chatbot:
                 f"font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif'>"
                 f"<div style='font-size:11px;color:#92400e;"
                 f"text-transform:uppercase;letter-spacing:.4px'>"
-                f"🤖 LLM 이 사용자에게 질문 · "
-                f"{'객관식' if qtype == 'choice' else '주관식'}</div>"
+                f"🤖 LLM 이 사용자에게 질문 · {tag}</div>"
                 f"<div style='font-size:13px;color:#7c2d12;margin-top:4px'>"
                 f"{_html_escape(str(question))}</div></div>"
             ))
 
             submit_btn = W.Button(description="답변 제출",
                                   button_style="success", icon="check")
+
+            if qtype == "multi_choice":
+                options = list((payload or {}).get("options") or [])
+                if not options:
+                    options = ["(옵션 없음)"]
+                # 여러 Checkbox 를 VBox 로 묶어 복수선택 UI 를 구성
+                checkboxes = [
+                    W.Checkbox(value=False, description=opt, indent=False,
+                               layout=W.Layout(width="100%", margin="0"))
+                    for opt in options
+                ]
+                hint = W.HTML(value=(
+                    "<div style='color:#666;font-size:11px;margin:2px 0 6px 0'>"
+                    "✓ 하나 이상 체크하고 '답변 제출' 을 누르세요.</div>"
+                ))
+                box = W.VBox(checkboxes, layout=W.Layout(
+                    border="1px solid #e5e5e5", border_radius="4px",
+                    padding="6px 8px", margin="0",
+                ))
+
+                def _on_submit(_btn=None):
+                    selected = [cb.description for cb in checkboxes if cb.value]
+                    if not selected:
+                        status.value = ("<span style='color:#b45309;font-size:11px'>"
+                                        "최소 1개 이상 체크해주세요.</span>")
+                        return
+                    submit_btn.disabled = True
+                    status.value = ("<span style='color:#888;font-size:11px'>"
+                                    "응답 처리 중…</span>")
+                    try:
+                        self.resume(selected)
+                        _render_history()
+                        _update_status_ok()
+                    except Exception as e:
+                        _show_error(e)
+                    finally:
+                        submit_btn.disabled = False
+                        _refresh_input()
+
+                submit_btn.on_click(_on_submit)
+                return W.VBox([banner, hint, box, submit_btn])
 
             if qtype == "choice":
                 options = list((payload or {}).get("options") or [])
@@ -899,7 +966,7 @@ def _render_history_html(messages: list[dict], thread_id: str = "") -> str:
         ask_html = ""
         if isinstance(ask, dict):
             qtype = ask.get("type", "input")
-            tag = "객관식" if qtype == "choice" else "주관식"
+            tag = {"choice": "객관식", "multi_choice": "복수선택"}.get(qtype, "주관식")
             opts = ask.get("options") or []
             opts_html = ""
             if opts:
