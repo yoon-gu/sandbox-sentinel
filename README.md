@@ -19,20 +19,18 @@
 ```
 sandbox-sentinel/
 ├── README.md                     # 이 문서
-├── CLAUDE.md                     # 프로젝트 규칙 (Agent 행동 지침, 코딩 컨벤션, 금지사항 등)
-├── active_stack.txt              # 현재 활성 스택 (references/allowed-stacks/ 내 파일명, 선택)
+├── CLAUDE.md                     # 변환 Agent 의 환경 무관 공통 원칙 (워크플로, 코드 스타일, 원칙 레벨 금지사항)
 ├── .claude/
 │   └── skills/                   # Claude Code가 자동 로드하는 프로젝트 Skill 모음
 │       └── environment-adapter/
-│           └── SKILL.md
-├── references/                   # 환경 스택, API 매핑 등 참조 자료
-│   ├── allowed-stacks/
-│   └── api-mappings/
+│           ├── SKILL.md          # 환경별 구체 정책을 전담하는 Skill
+│           └── stacks/
+│               └── default.yaml  # 기본 스택 정의 (허용/금지 패키지·라이선스·영속화 포맷)
 ├── 001-langgraph-notebook-chatbot/   # 변환물 #1: Jupyter용 LangGraph 챗봇 + HTML 트레이서
 └── 002-sentinel-track/               # 변환물 #2: 폐쇄망용 wandb 호환 실험 트래커
 ```
 
-> `references/`와 `active_stack.txt`는 새 환경에 맞춰 스택 정의(YAML)를 추가하는 자리입니다. 지금 비어 있거나 없더라도 Agent는 기본 스택(`default.yaml`)을 가정하고 사용자에게 확인을 요청합니다. 자세한 규칙은 `CLAUDE.md` 섹션 4 참고.
+> **역할 분담**: CLAUDE.md 는 환경과 무관한 공통 원칙 (OSS 탐색·핵심 추출·single-file 구현 등)만 담고, **허용/금지 패키지 · 라이선스 카테고리 · 영속화 포맷 · Python/CUDA 버전** 같이 타겟 폐쇄망마다 달라지는 구체 리스트는 `.claude/skills/environment-adapter/` 가 단독으로 소유·관리합니다. 새 환경이 필요하면 `stacks/<env-name>.yaml` 을 추가하면 됩니다.
 
 ## 사용 가능한 Skills
 
@@ -47,14 +45,16 @@ Claude Code는 다음 경로의 Skill만 자동 인식합니다.
 
 | Skill | 경로 | 언제 쓰는가 |
 |---|---|---|
-| **environment-adapter** | [`.claude/skills/environment-adapter/SKILL.md`](.claude/skills/environment-adapter/SKILL.md) | 타겟 폐쇄망 환경(Dockerfile, requirements.txt, `docker inspect`, `pip freeze` 등)에 맞춰 이미 만들어진 변환물 코드를 조정할 때. API 변경, Python 문법 다운그레이드, 누락 패키지 대체안 등 지원. |
+| **environment-adapter** | [`.claude/skills/environment-adapter/SKILL.md`](.claude/skills/environment-adapter/SKILL.md) | **모든 변환 작업 시작 시 + 타겟 환경 스펙 제공 시 자동 트리거.** 허용/금지 패키지·라이선스 정책·영속화 포맷 등 환경 정책 리스트를 소유하며 변환 코드에 강제. API 변경 치환, Python 문법 다운그레이드, 누락 패키지 대체안도 담당. |
 
 ### environment-adapter 요약
 
-- **입력**: Dockerfile / requirements.txt / `docker inspect` JSON / `pip freeze` 출력 / 자유 서술 등 다양한 환경 명세
-- **기능**: ① 라이브러리 버전 간 API 호환 치환, ② Python 3.10+ 문법을 3.8·3.9로 다운그레이드, ③ 누락 패키지의 대체안 제시, ④ 활성 스택과의 gap 분석, ⑤ `MIGRATION.md` 생성
-- **제약**: 의미가 바뀌는 치환은 자동 적용하지 않고 반드시 사용자 확인. Cython/C extension 기반 동작은 조정 범위 밖(재변환 필요).
-- **사용 예**: "이 Dockerfile에 001을 맞춰줘", "폐쇄망에서 `AttributeError: module numpy has no attribute int` 떠", "3.10 문법을 3.9로 내려줘"
+- **책임 범위**: CLAUDE.md 의 공통 원칙 (영속화는 HTML로, 네트워크 호출 없음 등) 을 **환경별 구체 리스트** (어떤 패키지/라이선스/확장자가 금지/허용인지) 로 내려받아 집행
+- **소유 자산**: `stacks/default.yaml` 등 환경 스택 정의 YAML (Skill 디렉토리 내부)
+- **입력**: Dockerfile / requirements.txt / `docker inspect` JSON / `pip freeze` 출력 / 자유 서술 등 다양한 환경 명세 (없으면 `stacks/default.yaml` 가정 + 사용자 확인)
+- **기능**: ① 타겟 스택 결정·사용자 확인, ② 허용/금지 검증, ③ 라이브러리 버전 간 API 호환 치환, ④ Python 3.10+ 문법을 3.8·3.9 로 다운그레이드, ⑤ 누락 패키지 대체안 제시, ⑥ `MIGRATION.md` 생성
+- **제약**: 의미가 바뀌는 치환은 자동 적용하지 않고 반드시 사용자 확인. Cython/C extension 기반 동작은 조정 범위 밖 (재변환 필요).
+- **사용 예**: "이 Dockerfile 에 001 을 맞춰줘" · "폐쇄망에서 `AttributeError: module numpy has no attribute int` 떠" · "3.10 문법을 3.9 로 내려줘"
 
 ## 변환물 인덱스
 
