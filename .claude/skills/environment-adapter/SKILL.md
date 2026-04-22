@@ -1,6 +1,6 @@
 ---
 name: environment-adapter
-description: Adapt converted single-file code to a specific closed-network Python environment (특정 폐쇄망 Python 환경에 변환물 코드를 조정). Use **at the start of every conversion task** to resolve the target stack, and whenever the user provides a Dockerfile, requirements.txt, `docker inspect` output, `pip freeze`, or any other environment specification. Also use when API deprecation warnings or ImportError surface on a target environment, when a converted artifact needs to be downgraded to older Python (3.8/3.9), when a required package is missing from the allowed stack and a substitute is needed, or when the user asks for a migration guide between two environments. This skill **owns the concrete environment policy** — allowed/blocked packages, license categories, blocked persistence formats, Python/CUDA versions — delegated from CLAUDE.md. Do not use for fresh conversions from open-source libraries — that's the main conversion workflow described in CLAUDE.md.
+description: Adapt converted single-file code to a specific closed-network Python environment (특정 폐쇄망 Python 환경에 변환물 코드를 조정). Use **at the start of every conversion task** to resolve the target stack, and whenever the user provides a Dockerfile, requirements.txt, `docker inspect` output, `pip freeze`, or any other environment specification. Also use when API deprecation warnings or ImportError surface on a target environment, when a converted artifact needs to be downgraded to older Python (3.8/3.9), when a required package is missing from the allowed stack and a substitute is needed, or when the user asks for a migration guide between two environments. **Crucially: also trigger whenever the user (or agent) is about to run/test a converted artifact — check that the project's `.venv/bin/python --version` matches the active stack's `python` field before execution, and flag mismatches for the user before running.** This skill **owns the concrete environment policy** — allowed/blocked packages, license categories, blocked persistence formats, Python/CUDA versions — delegated from CLAUDE.md. Do not use for fresh conversions from open-source libraries — that's the main conversion workflow described in CLAUDE.md.
 ---
 
 # Environment Adapter
@@ -136,6 +136,50 @@ CLAUDE.md 는 "**환경 무관 공통 원칙**" (변환 워크플로, 코드 스
 - 변경된 파일과 라인 번호
 - 수동 검토가 필요한 부분 (의미 변경 가능성이 있는 치환)
 - 테스트 권장 항목
+
+### 5. 런타임 환경 검증 (⭐ 매번 반드시)
+
+사용자가 변환물을 **실제로 실행/테스트** 하는 흐름 (예: `cd NNN-* && .venv/bin/python examples/basic_usage.py`) 이 발생할 때 — 또는 Agent 가 스모크 테스트로 변환물을 돌려볼 때 — **반드시 다음 체크를 먼저 수행**:
+
+**체크 절차**:
+
+1. **활성 스택의 `python` 필드 읽기** — 예: `stacks/default.yaml` 의 `python: "3.11"`
+2. **실행 환경의 Python 버전 확인** — 대상 폴더 하위 `.venv/bin/python --version` (또는 사용자가 명시한 인터프리터)
+3. **불일치 시 사용자에게 알림** — 자동으로 재생성하지 않고 먼저 보고:
+   ```
+   ⚠️ 스택 스펙(python 3.11)과 .venv 버전(python 3.14) 이 다릅니다.
+   재생성할까요? 아니면 이 차이를 허용하고 진행할까요?
+   ```
+4. **사용자 동의 후 재생성** — 예 (macOS/Linux):
+   ```bash
+   rm -rf <폴더>/.venv
+   /opt/homebrew/bin/python3.11 -m venv <폴더>/.venv
+   <폴더>/.venv/bin/pip install <필요 패키지>
+   ```
+   Windows 등 플랫폼은 동등한 명령으로 대체.
+
+**왜 중요한가**:
+- 로컬 테스트가 스택 버전과 다른 인터프리터에서 통과해도, 실제 타겟(폐쇄망) 에서 **미묘한 버전 차이로 터질 수 있음** (문법, 표준 라이브러리 동작 변화, 타입 힌트 평가 시점 등)
+- 사용자는 "내 환경은 스택 기준인 3.11 만 써요" 라고 이미 말했다고 가정하고 행동 — 매번 묻지 않더라도 `.venv` 가 스펙과 다르면 **먼저 플래그**
+- 이 체크를 빠뜨리면 "왜 개발자 로컬에선 되는데 심사 통과 후 환경에선 안 되죠?" 상황이 생김
+
+**적용 시점**:
+- 새 venv 를 생성할 때 (`python -m venv`)
+- 기존 변환물을 실행/디버깅할 때 (사용자가 `python examples/*.py` 같은 명령을 준비/요청할 때)
+- Agent 가 자체 스모크 테스트를 돌리기 전
+- 변환물별 `.venv/` 가 여러 개 있는 경우 전부 일괄 확인
+
+**체크 스니펫** (참고용):
+```bash
+# 스택에서 python 버전 읽기
+STACK_PY=$(grep '^python:' .claude/skills/environment-adapter/stacks/default.yaml | awk -F'"' '{print $2}')
+
+# 각 변환물 .venv 버전 확인
+for d in ???-*/; do
+  VENV_PY=$("$d.venv/bin/python" --version 2>&1 | awk '{print $2}' | cut -d. -f1-2)
+  [ "$VENV_PY" = "$STACK_PY" ] && echo "✓ $d : $VENV_PY" || echo "⚠ $d : $VENV_PY (기대: $STACK_PY)"
+done
+```
 
 ---
 
