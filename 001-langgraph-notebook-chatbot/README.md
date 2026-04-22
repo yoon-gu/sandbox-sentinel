@@ -2,6 +2,10 @@
 
 > **한 줄 요약**: 폐쇄망 Jupyter 노트북에서 돌리는 LangGraph 멀티턴 챗봇 + LangSmith 스타일의 self-contained HTML 관찰성(observability) 뷰어
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yoon-gu/sandbox-sentinel/blob/master/001-langgraph-notebook-chatbot/examples/demo.ipynb)
+
+> 💡 **Colab 으로 빠르게 체험하기**: 위 배지를 누르면 `demo.ipynb` 가 Google Colab 에서 열립니다. 첫 code 셀이 Colab 을 감지해 GitHub raw URL 에서 `chatbot.py` 를 자동으로 내려받으므로 별도 clone/설치 없이 바로 실행 가능합니다. 폐쇄망 환경에서는 해당 우회가 건너뛰어지고 상대경로로 로드됩니다.
+
 ## 원본 출처
 
 | 항목 | 값 |
