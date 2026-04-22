@@ -14,6 +14,7 @@
 ## 기능 요약
 
 - **멀티턴 대화**: `langgraph.checkpoint.memory.MemorySaver` + `thread_id` 기반. `bot.chat()` 을 반복 호출하면 같은 thread의 맥락이 유지됩니다.
+- **Human-in-the-loop (HITL)**: LLM 이 응답에 `ask_user={"type": "input"|"choice", ...}` 를 담아 보내면, 그래프가 `langgraph.types.interrupt()` 로 자동 일시정지합니다. 호출자는 `bot.pending_interrupt` 의 페이로드를 보고 UI(주관식 Textarea / 객관식 RadioButtons)를 띄운 뒤 `bot.resume(answer)` 로 그래프를 이어 나갑니다. `chat_ui()` 는 이 전환을 자동 처리합니다.
 - **간이 트레이서(LangSmith 대체)**: chain/LLM/tool 레벨의 계층형 span을 메모리에 수집합니다. 각 span은 `parent_id`, 시작/종료 시각, 입출력, 토큰 수, latency, 에러를 포함합니다.
 - **self-contained HTML 뷰어**: 수집된 span을 `<script type="application/json">`로 임베드한 단일 HTML로 저장합니다. 외부 `fetch`, `<script src>`, `<link href>` **일절 없음** — 업무망에서도 파일 하나만으로 동작합니다.
 - **Jupyter 친화 API**:
@@ -59,6 +60,40 @@ bot.show_history()                  # 셀 안에 대화 풍선으로 표시
 bot.show_trace()                    # 셀 안에 트레이스 뷰어 표시
 bot.save_trace("trace.html")        # 업무망 반출용 HTML 내보내기
 ```
+
+### Human-in-the-loop 사용법
+
+LLM 어댑터의 `invoke()` 반환 dict 에 `ask_user` 필드를 실으면 그래프가 자동으로 멈추고 사용자 응답을 기다립니다.
+
+```python
+# 1) LLM 이 객관식으로 되묻기로 결정한 응답 예시
+{
+    "role": "assistant",
+    "content": "어떤 방향을 선호하시나요?",           # 채팅 풍선에 그대로 표시
+    "ask_user": {
+        "type": "choice",                         # 또는 "input" (주관식)
+        "question": "어떤 방향을 선호하시나요?",
+        "options": ["안정적", "균형형", "적극적"],   # choice 에만 사용
+    },
+}
+```
+
+프로그래매틱 사용:
+
+```python
+reply = bot.chat("포트폴리오 추천해줘")
+if bot.pending_interrupt is not None:
+    ask = bot.pending_interrupt
+    if ask["type"] == "choice":
+        picked = ask["options"][0]                # 사용자가 선택한 값
+    else:
+        picked = "구체적 답변 텍스트"
+    final = bot.resume(picked)                    # 그래프를 이어가 최종 답변 수신
+```
+
+`bot.chat_ui()` 를 쓰면 위 전환이 **셀 하나의 output 안에서** 자동으로 일어납니다 — 입력창이 주관식 Textarea 또는 객관식 RadioButtons 로 교체되고, "답변 제출" 을 누르면 `resume()` 이 호출됩니다.
+
+MockLLM 은 사용자 메시지에 "추천/골라/옵션/선택지" 가 있으면 객관식을, "설명해/알려줘/명확/구체적" 이 있으면 주관식을 자동 트리거해 UI 를 바로 시연할 수 있습니다.
 
 ### 실제 사내 LLM으로 교체하기
 
