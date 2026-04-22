@@ -55,7 +55,7 @@ from chatbot import Chatbot
 bot = Chatbot()          # 새 thread_id + MockLLM
 
 # (A) 인터랙티브 UI — 셀 하나로 멀티턴 대화
-bot.chat_ui()            # 대화 UI · [트레이스 저장 & 링크] 버튼 → 파일 저장 + OS 기본 브라우저 자동 열기
+bot.chat_ui()            # 대화 UI · [트레이스 다운로드] 버튼 → data URL 링크로 브라우저 다운로드
 
 # (B) 프로그래매틱 방식 — 셀 단위로 쪼개서 쓰기
 bot.chat("안녕")                    # 턴 1

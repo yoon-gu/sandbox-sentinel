@@ -563,12 +563,11 @@ class Chatbot:
         **레이아웃**: 세로 스택 — 대화 이력 / 입력창 / [트레이스 저장 · 새 대화] 버튼 /
         상태 / 트레이스 링크 영역.
 
-        트레이스는 **[트레이스 저장 & 링크]** 버튼을 누르면 `trace_<thread_id>_<ts>.html`
-        로 저장되고, **OS 기본 브라우저가 자동으로 해당 파일을 엽니다** (macOS `open`,
-        Linux `xdg-open`, Windows `os.startfile`). 저장 경로는 결과 영역에 표시되므로
-        자동 열기가 안 되면(원격 kernel 등) 경로를 복사해 브라우저 주소창에 `file://`
-        접두어로 직접 열면 됩니다. Jupyter/Colab 의 document viewer 라우팅 (/lab/tree/*,
-        위젯 sanitizer 등)을 완전히 우회하므로 어느 환경이든 JS 가 정상 실행됩니다.
+        트레이스는 **[트레이스 다운로드]** 버튼을 누르면 결과 영역에 data URL 기반 다운로드
+        링크가 표시됩니다. 링크를 클릭하면 브라우저가 `trace_<thread_id>_<ts>.html` 을
+        사용자 Downloads 폴더로 내려받고, 이후 더블클릭해 열면 브라우저가 self-contained
+        HTML 을 직접 렌더합니다. 파일 시스템에 중간 산출물을 남기지 않으며, Jupyter/Colab/
+        JupyterHub 등 모든 환경에서 원격 kernel 여부와 무관하게 동일하게 작동합니다.
 
         일반 대화에서는 입력창 + 보내기 버튼이 보이지만, LLM 이 사용자에게 되묻기로
         결정하면(= `self.pending_interrupt` 가 채워지면) 입력 영역이 동적으로 교체됩니다.
@@ -606,7 +605,7 @@ class Chatbot:
         # pending_interrupt 유무에 따라 children 이 매번 교체되는 컨테이너.
         input_container = W.VBox([])
 
-        trace_btn = W.Button(description="트레이스 저장 & 링크",
+        trace_btn = W.Button(description="트레이스 다운로드",
                              button_style="info", icon="download")
         reset_btn = W.Button(description="새 대화 (thread 리셋)",
                              button_style="warning", icon="refresh")
@@ -787,61 +786,41 @@ class Chatbot:
                 )
 
         def _on_trace(_btn):
-            """트레이스를 파일로 저장하고, OS 기본 브라우저로 직접 열기.
+            """트레이스를 base64 data URL 다운로드 링크로 제공.
 
-            JupyterLab/Colab 의 내부 document viewer 라우팅(/lab/tree/*, 위젯 sanitizer 등)
-            을 **완전히 우회** 한다. 저장된 file:// 경로를 OS 커맨드(`open`/`xdg-open`/
-            `os.startfile`) 로 직접 열면 기본 브라우저가 새 창에서 렌더하므로 <script> 가
-            정상 실행되어 span 트리가 완전히 보인다.
+            data URL + <a download=...> 조합은 파일 시스템/서버 라우팅과 무관하게
+            브라우저가 바로 Downloads 폴더로 파일을 떨어뜨린다. JupyterLab 의 /lab/tree/*
+            라우팅, Colab 의 원격 VM, 원격 JupyterHub 모두에서 동일하게 작동.
+            사용자는 다운받은 HTML 을 더블클릭하면 브라우저가 직접 렌더 (JS 정상 실행).
             """
+            import base64 as _b64
             import datetime as _dt
-            import os as _os
-            import subprocess as _sp
-            import sys as _sys
             ts = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-            path = f"trace_{self.thread_id}_{ts}.html"
-            self.tracer.save_html(
-                path, title=f"Trace — thread {self.thread_id} @ {ts}"
+            filename = f"trace_{self.thread_id}_{ts}.html"
+            html_src = self.tracer.to_html(
+                title=f"Trace — thread {self.thread_id} @ {ts}"
             )
-            abs_path = _os.path.abspath(path)
+            data_url = (
+                "data:text/html;base64,"
+                + _b64.b64encode(html_src.encode("utf-8")).decode("ascii")
+            )
             span_count = len(self.tracer.spans)
-
-            # OS 기본 브라우저로 자동 열기 시도 (로컬 kernel 한정)
-            opened = False
-            open_err: Optional[str] = None
-            try:
-                if _sys.platform == "darwin":
-                    _sp.run(["open", abs_path], check=False)
-                    opened = True
-                elif _sys.platform.startswith("linux"):
-                    _sp.run(["xdg-open", abs_path], check=False)
-                    opened = True
-                elif _sys.platform == "win32":
-                    _os.startfile(abs_path)  # type: ignore[attr-defined]
-                    opened = True
-            except Exception as e:
-                open_err = f"{type(e).__name__}: {e}"
 
             with trace_link_area:
                 clear_output(wait=True)
-                opened_note = (
-                    "— 🚀 OS 기본 브라우저로 자동 열기 시도 완료"
-                    if opened else
-                    "— ⚠️ 자동 열기 실패 "
-                    f"({_html_escape(open_err) if open_err else '지원되지 않는 플랫폼'})"
-                )
                 display(HTML(
                     f'<div style="font-size:12px;padding:10px 12px;'
                     f'background:#ecfdf5;border:1px solid #86efac;'
-                    f'border-radius:6px;color:#065f46;line-height:1.55">'
-                    f'✅ 트레이스 저장됨 · {span_count} spans {opened_note}'
-                    f'<br><span style="color:#047857">경로:</span> '
-                    f'<code style="font-size:11px;background:#f0fdf4;'
-                    f'padding:2px 6px;border-radius:3px">{_html_escape(abs_path)}</code>'
+                    f'border-radius:6px;color:#065f46;line-height:1.6">'
+                    f'✅ 트레이스 준비됨 · {span_count} spans — '
+                    f'<a href="{data_url}" download="{_html_escape(filename)}" '
+                    f'style="color:#047857;font-weight:500;background:#fff;'
+                    f'padding:4px 10px;border-radius:4px;border:1px solid #86efac;'
+                    f'text-decoration:none;display:inline-block;margin:2px 0">'
+                    f'💾 {_html_escape(filename)} 다운로드</a>'
                     f'<br><span style="color:#888;font-size:11px">'
-                    f'자동 열기가 안 됐거나 원격 kernel 이라면 위 경로를 브라우저 주소창에 '
-                    f'<code>file://</code> 접두어 붙여 직접 여세요.</span>'
-                    f'</div>'
+                    f'다운로드한 파일을 더블클릭하면 브라우저가 트레이스를 직접 렌더합니다.'
+                    f'</span></div>'
                 ))
 
         def _on_reset(_btn):
