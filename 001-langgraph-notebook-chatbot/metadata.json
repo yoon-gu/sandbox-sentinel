@@ -3,7 +3,7 @@
   "name": "langgraph-notebook-chatbot",
   "source": {
     "library": "langgraph",
-    "version": ">=0.2,<1.0",
+    "version": "1.0.10",
     "url": "https://github.com/langchain-ai/langgraph",
     "license": "MIT",
     "commit_sha": "N/A (라이브러리 의존 사용; 코드 복제 아님)"

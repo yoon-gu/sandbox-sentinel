@@ -7,7 +7,7 @@
 | 항목 | 값 |
 |---|---|
 | 라이브러리 | [langgraph](https://github.com/langchain-ai/langgraph) (StateGraph, MemorySaver 활용) |
-| 버전 | `>=0.2,<1.0` |
+| 버전 | `1.0.10` (폐쇄망 기본 스택 기준. `MemorySaver`는 1.0 에서 `InMemorySaver`의 backcompat alias로 유지) |
 | 라이선스 | MIT |
 | 관찰성 개념 참고 | [LangSmith](https://smith.langchain.com/) — **코드 복제 아님**, span/latency/tokens 개념만 참고 재구현 |
 
