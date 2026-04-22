@@ -322,8 +322,11 @@ class _HITLInputScreen(ModalScreen[Optional[str]]):
     """
 
     BINDINGS = [
-        Binding("escape", "cancel", "취소", show=False),
-        Binding("ctrl+s", "submit", "제출", show=True),
+        # priority=True 로 widget-level 입력(예: TextArea/Checkbox 자체 keymap) 보다 먼저 매칭
+        Binding("escape", "cancel", "취소", show=False, priority=True),
+        # Ctrl+S 는 터미널 XON/XOFF 에 잡혀 불가 → Alt+Enter + F2 병행 + 버튼 클릭도 가능
+        Binding("alt+enter", "submit", "제출", show=True, priority=True),
+        Binding("f2", "submit", "F2 제출", show=False, priority=True),
     ]
 
     def __init__(self, question: str) -> None:
@@ -337,7 +340,7 @@ class _HITLInputScreen(ModalScreen[Optional[str]]):
             yield TextArea(id="answer-input")
             with Horizontal():
                 yield Button("취소", id="cancel-btn", variant="default")
-                yield Button("제출 (Ctrl+S)", id="submit-btn", variant="success")
+                yield Button("제출 (Alt+Enter · F2)", id="submit-btn", variant="success")
 
     def on_mount(self) -> None:
         self.query_one("#answer-input", TextArea).focus()
@@ -396,7 +399,7 @@ class _HITLChoiceScreen(ModalScreen[Optional[str]]):
                     yield RadioButton(opt, value=(i == 0))
             with Horizontal():
                 yield Button("취소", id="cancel-btn", variant="default")
-                yield Button("제출 (Ctrl+S)", id="submit-btn", variant="success")
+                yield Button("제출 (Alt+Enter · F2)", id="submit-btn", variant="success")
 
     def on_mount(self) -> None:
         self.query_one("#choice-set", RadioSet).focus()
@@ -440,8 +443,11 @@ class _HITLMultiChoiceScreen(ModalScreen[Optional[list[str]]]):
     """
 
     BINDINGS = [
-        Binding("escape", "cancel", "취소", show=False),
-        Binding("ctrl+s", "submit", "제출", show=True),
+        # priority=True 로 widget-level 입력(예: TextArea/Checkbox 자체 keymap) 보다 먼저 매칭
+        Binding("escape", "cancel", "취소", show=False, priority=True),
+        # Ctrl+S 는 터미널 XON/XOFF 에 잡혀 불가 → Alt+Enter + F2 병행 + 버튼 클릭도 가능
+        Binding("alt+enter", "submit", "제출", show=True, priority=True),
+        Binding("f2", "submit", "F2 제출", show=False, priority=True),
     ]
 
     def __init__(self, question: str, options: list[str]) -> None:
@@ -453,13 +459,13 @@ class _HITLMultiChoiceScreen(ModalScreen[Optional[list[str]]]):
         with Vertical():
             yield Label(f"🤚 LLM 이 사용자에게 질문 · 복수선택", classes="banner")
             yield Label(self.question)
-            yield Label("✓ 하나 이상 체크하고 Ctrl+S 로 제출 (스페이스 토글)", classes="hint")
+            yield Label("✓ 스페이스로 체크, Alt+Enter(또는 F2) 로 제출 — 최소 1개 체크 필요", classes="hint")
             with VerticalScroll():
                 for i, opt in enumerate(self.options):
                     yield Checkbox(opt, id=f"cb-{i}")
             with Horizontal():
                 yield Button("취소", id="cancel-btn", variant="default")
-                yield Button("제출 (Ctrl+S)", id="submit-btn", variant="success")
+                yield Button("제출 (Alt+Enter · F2)", id="submit-btn", variant="success")
 
     def on_mount(self) -> None:
         # 첫 체크박스에 포커스
@@ -492,6 +498,84 @@ class _HITLMultiChoiceScreen(ModalScreen[Optional[list[str]]]):
             self.action_submit()
         elif event.button.id == "cancel-btn":
             self.action_cancel()
+
+
+class _ToolDetailsScreen(ModalScreen[None]):
+    """F3 으로 띄우는 tool 호출 상세 뷰어.
+
+    현재 Tracer 에 쌓인 모든 kind='tool' span 을 inputs/outputs/metadata JSON 까지
+    펼쳐 보여준다. RichLog 기반이라 PageUp/PageDown 등 스크롤 가능.
+    """
+
+    DEFAULT_CSS = """
+    _ToolDetailsScreen { align: center middle; }
+    _ToolDetailsScreen > Vertical {
+        width: 110; height: 36; padding: 1 2;
+        border: thick $success; background: $surface;
+    }
+    _ToolDetailsScreen Label.title {
+        text-style: bold; color: $success; margin-bottom: 1;
+    }
+    _ToolDetailsScreen RichLog {
+        height: 1fr; border: solid $primary; padding: 0 1;
+    }
+    _ToolDetailsScreen Horizontal { align: right middle; margin-top: 1; }
+    _ToolDetailsScreen Button { margin-left: 1; }
+    """
+
+    BINDINGS = [
+        Binding("escape", "close", "닫기", show=True),
+        Binding("q", "close", "닫기", show=False),
+    ]
+
+    def __init__(self, tool_spans: list[Span]) -> None:
+        super().__init__()
+        self.tool_spans = tool_spans
+
+    def compose(self) -> ComposeResult:
+        title = f"⚙ Tool 호출 상세 · {len(self.tool_spans)}건 · ESC 로 닫기"
+        with Vertical():
+            yield Label(title, classes="title")
+            yield RichLog(id="tool-log", highlight=True, markup=True, wrap=True, auto_scroll=False)
+            with Horizontal():
+                yield Button("닫기 (ESC)", id="close-btn", variant="default")
+
+    def on_mount(self) -> None:
+        log = self.query_one("#tool-log", RichLog)
+        if not self.tool_spans:
+            log.write("[dim](tool 호출 기록이 없습니다 — 'calculator' 같은 키워드로 tool 을 먼저 호출해보세요)[/dim]")
+            return
+        for i, s in enumerate(self.tool_spans, 1):
+            latency = (s.end - s.start) * 1000.0 if s.end is not None else 0.0
+            log.write(f"[bold green]#{i}  {s.name}[/bold green]  [dim]· {latency:.1f} ms[/dim]")
+            log.write(f"[yellow]■ inputs[/yellow]")
+            log.write(self._fmt(s.inputs))
+            log.write(f"[yellow]■ outputs[/yellow]")
+            log.write(self._fmt(s.outputs))
+            if s.metadata:
+                log.write(f"[yellow]■ metadata[/yellow]")
+                log.write(self._fmt(s.metadata))
+            if s.error:
+                log.write(f"[red]■ error[/red]  {s.error}")
+            log.write("")  # 구분
+
+    @staticmethod
+    def _fmt(v: Any) -> str:
+        if v is None:
+            return "  [dim](없음)[/dim]"
+        try:
+            pretty = json.dumps(v, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            pretty = str(v)
+        # 각 줄 앞에 2칸 들여쓰기
+        return "\n".join("  " + ln for ln in pretty.splitlines())
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "close-btn":
+            self.action_close()
 
 
 # ===== 5. 메인 Textual 앱 =====
@@ -530,6 +614,7 @@ class ChatApp(App[None]):
         Binding("ctrl+c", "quit", "종료"),
         Binding("ctrl+n", "cmd_new", "새 대화"),
         Binding("ctrl+t", "cmd_trace", "트레이스 저장"),
+        Binding("f3", "cmd_tool_details", "Tool 상세"),
         Binding("f1", "cmd_help", "도움말"),
     ]
 
@@ -546,7 +631,7 @@ class ChatApp(App[None]):
         yield Static(id="status")
         yield Input(
             id="input",
-            placeholder="메시지 입력 (슬래시 명령: /help) · Ctrl+N=새 대화 · Ctrl+T=트레이스 저장",
+            placeholder="메시지 입력 · /help · Ctrl+N=새 대화 · Ctrl+T=트레이스 · F3=Tool 상세 · F1=도움말",
         )
         yield Footer()
 
@@ -608,18 +693,35 @@ class ChatApp(App[None]):
 
     def action_cmd_help(self) -> None:
         help_text = (
-            "[bold]슬래시 명령[/bold]\n"
+            "[bold]슬래시 명령 · 단축키[/bold]\n"
             "  [cyan]/new[/cyan]      새 thread 로 리셋 (맥락 끊기, Tracer 유지)  — Ctrl+N\n"
             "  [cyan]/trace[/cyan]    현재 트레이스를 HTML 파일로 저장            — Ctrl+T\n"
             "  [cyan]/history[/cyan]  현재 thread 의 대화 이력을 다시 출력\n"
+            "  [cyan]Tool 상세[/cyan]  최근 tool 호출들의 inputs/outputs/meta 모달 — [yellow]F3[/yellow]\n"
             "  [cyan]/help[/cyan]     이 도움말                                    — F1\n"
             "  [cyan]/quit[/cyan]     종료                                         — Ctrl+C\n\n"
+            "[bold]HITL 모달 안에서[/bold]\n"
+            "  제출: [yellow]Alt+Enter[/yellow] 또는 [yellow]F2[/yellow] (터미널에서 Ctrl+S 는 XON/XOFF 에 잡혀 안 됨)\n"
+            "  취소: Escape\n"
+            "  객관식: ↑/↓ 로 이동, 복수선택: Space 로 체크 토글\n\n"
             "[bold]HITL 트리거 (MockLLM 기준)[/bold]\n"
             "  복수선택: 여러, 복수, 해당, 체크, 모두\n"
             "  객관식  : 추천, 고를, 고르, 골라, 선택지, 옵션\n"
             "  주관식  : 설명해, 알려줘, 명확, 모호, 구체적"
         )
         self._write_system(help_text)
+
+    def action_cmd_tool_details(self) -> None:
+        """F3 — 실제 tool 호출 (name 이 'tool:' 로 시작하는 span) 만 모달 표시.
+
+        `kind=="tool"` 에는 HITL 응답(`human:answered`) 도 포함되지만 사용자 요청은
+        "도구 설명" 이므로 name prefix 로 좁혀서 실제 외부 도구 호출만 노출.
+        """
+        tool_spans = [
+            s for s in self.engine.tracer.spans
+            if s.kind == "tool" and s.name.startswith("tool:")
+        ]
+        self.push_screen(_ToolDetailsScreen(tool_spans))
 
     # ----- 그래프 실행 (worker 로 백그라운드 실행) -----
     def _submit_chat(self, text: str) -> None:

@@ -19,13 +19,15 @@
   - 중단: 상태바 (thread_id · LLM 호출수 · 토큰 · latency · HITL 대기 여부)
   - 하단: 입력창 (플레이스홀더 + 슬래시 명령 힌트)
 - **HITL 자동 모달** — LLM 응답에 `ask_user={"type": ..., "question": ..., "options": ...}` 가 실리면 그래프가 `interrupt()` 로 멈춤 → REPL 이 모달 화면 띄움:
-  - `"input"` (주관식) → **TextArea** + Ctrl+S 제출
-  - `"choice"` (객관식) → **RadioSet** + Ctrl+S 제출 (화살표로 선택 이동)
-  - `"multi_choice"` (복수선택) → **Checkbox 그룹** + Ctrl+S 제출 (최소 1개 강제, 스페이스로 토글)
-- **슬래시 명령**:
+  - `"input"` (주관식) → **TextArea** + `Alt+Enter` / `F2` / 버튼 클릭 제출
+  - `"choice"` (객관식) → **RadioSet** + 화살표로 선택 이동 + `Alt+Enter` / `F2` / 버튼 클릭 제출
+  - `"multi_choice"` (복수선택) → **Checkbox 그룹** + 스페이스로 토글 + `Alt+Enter` / `F2` / 버튼 클릭 제출 (최소 1개 강제)
+  - 제출 키가 터미널에서 안 먹으면 `Tab` 으로 포커스 옮긴 뒤 `Enter` 로 버튼 클릭
+- **슬래시 명령 및 단축키**:
   - `/new` — 새 thread 로 리셋 (맥락 끊기, Tracer 는 유지) — `Ctrl+N`
   - `/trace` — 현재 트레이스를 `trace_<thread>_<ts>.html` 로 저장 — `Ctrl+T`
   - `/history` — 대화 이력을 다시 출력
+  - **Tool 호출 상세** — `F3` 로 모달 표시 (모든 tool span 의 inputs/outputs/metadata JSON 펼쳐서 봄, 스크롤 가능)
   - `/help` — 도움말 — `F1`
   - `/quit` — 종료 (또는 `Ctrl+C`)
 - **그래프 실행은 워커 스레드** — UI 가 프리즈되지 않음. 상태바에 `⏳ 응답 생성 중…` 표시
