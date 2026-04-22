@@ -20,8 +20,8 @@
   - 하단: 입력창 (플레이스홀더 + 슬래시 명령 힌트)
 - **HITL 자동 모달** — LLM 응답에 `ask_user={"type": ..., "question": ..., "options": ...}` 가 실리면 그래프가 `interrupt()` 로 멈춤 → REPL 이 모달 화면 띄움:
   - `"input"` (주관식) → **TextArea** + Ctrl+S 제출
-  - `"choice"` (객관식) → **RadioSet** + Enter 제출
-  - `"multi_choice"` (복수선택) → **Checkbox 그룹** + Ctrl+S 제출 (최소 1개 강제)
+  - `"choice"` (객관식) → **RadioSet** + Ctrl+S 제출 (화살표로 선택 이동)
+  - `"multi_choice"` (복수선택) → **Checkbox 그룹** + Ctrl+S 제출 (최소 1개 강제, 스페이스로 토글)
 - **슬래시 명령**:
   - `/new` — 새 thread 로 리셋 (맥락 끊기, Tracer 는 유지) — `Ctrl+N`
   - `/trace` — 현재 트레이스를 `trace_<thread>_<ts>.html` 로 저장 — `Ctrl+T`

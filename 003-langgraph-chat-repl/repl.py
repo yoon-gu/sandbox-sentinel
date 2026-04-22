@@ -376,7 +376,8 @@ class _HITLChoiceScreen(ModalScreen[Optional[str]]):
 
     BINDINGS = [
         Binding("escape", "cancel", "취소", show=False),
-        Binding("enter", "submit", "제출", show=True),
+        # Enter 는 RadioSet 이 흡수하므로 (포커스된 옵션 토글), 제출은 Ctrl+S 로 통일
+        Binding("ctrl+s", "submit", "제출", show=True),
     ]
 
     def __init__(self, question: str, options: list[str]) -> None:
@@ -389,18 +390,16 @@ class _HITLChoiceScreen(ModalScreen[Optional[str]]):
             yield Label(f"🤚 LLM 이 사용자에게 질문 · 객관식", classes="banner")
             yield Label(self.question)
             with RadioSet(id="choice-set"):
-                for opt in self.options:
-                    yield RadioButton(opt)
+                # 첫 옵션을 기본 선택 (Textual 의 RadioSet.pressed_index 는 read-only
+                # property 라 mount 후 setter 할당이 불가. RadioButton value 로 지정.)
+                for i, opt in enumerate(self.options):
+                    yield RadioButton(opt, value=(i == 0))
             with Horizontal():
                 yield Button("취소", id="cancel-btn", variant="default")
-                yield Button("제출 (Enter)", id="submit-btn", variant="success")
+                yield Button("제출 (Ctrl+S)", id="submit-btn", variant="success")
 
     def on_mount(self) -> None:
-        rs = self.query_one("#choice-set", RadioSet)
-        # 첫 옵션을 기본 선택
-        if self.options:
-            rs.pressed_index = 0
-        rs.focus()
+        self.query_one("#choice-set", RadioSet).focus()
 
     def action_submit(self) -> None:
         rs = self.query_one("#choice-set", RadioSet)
