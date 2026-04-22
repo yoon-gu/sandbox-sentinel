@@ -18,18 +18,20 @@
   - 상단: `RichLog` 스크롤 가능 대화 이력 (user / assistant / tool / system 색상 구분)
   - 중단: 상태바 (thread_id · LLM 호출수 · 토큰 · latency · HITL 대기 여부)
   - 하단: 입력창 (플레이스홀더 + 슬래시 명령 힌트)
-- **HITL 자동 모달** — LLM 응답에 `ask_user={"type": ..., "question": ..., "options": ...}` 가 실리면 그래프가 `interrupt()` 로 멈춤 → REPL 이 모달 화면 띄움:
-  - `"input"` (주관식) → **TextArea** + `Alt+Enter` / `F2` / 버튼 클릭 제출
-  - `"choice"` (객관식) → **RadioSet** + 화살표로 선택 이동 + `Alt+Enter` / `F2` / 버튼 클릭 제출
-  - `"multi_choice"` (복수선택) → **Checkbox 그룹** + 스페이스로 토글 + `Alt+Enter` / `F2` / 버튼 클릭 제출 (최소 1개 강제)
-  - 제출 키가 터미널에서 안 먹으면 `Tab` 으로 포커스 옮긴 뒤 `Enter` 로 버튼 클릭
-- **슬래시 명령 및 단축키**:
+- **인라인 HITL** (Claude Code 스타일 — 팝업 모달 없음) — LLM 응답에 `ask_user={"type": ..., "question": ..., "options": ...}` 가 실리면 그래프가 `interrupt()` 로 멈추고, **입력창이 HITL 전용 위젯으로 인라인 전환**:
+  - `"input"` (주관식) → **Input** 위젯 · 답변 타이핑 후 `Enter` 제출
+  - `"choice"` (객관식) → **OptionList** · `↑↓` 로 이동 · `Enter` 로 선택
+  - `"multi_choice"` (복수선택) → **커스텀 체크리스트** · `↑↓` 로 이동 · `Space` 로 토글 · `Enter` 로 제출
+  - 위 셋 모두 `Esc` 로 취소 가능
+  - 상단에 배너 (`🤚 객관식/복수선택/주관식  질문문구  ↑↓ ... Enter ... Esc`) 가 자동 노출
+- **슬래시 명령 및 단축키** (macOS 친화 표준 키만 사용):
   - `/new` — 새 thread 로 리셋 (맥락 끊기, Tracer 는 유지) — `Ctrl+N`
   - `/trace` — 현재 트레이스를 `trace_<thread>_<ts>.html` 로 저장 — `Ctrl+T`
   - `/history` — 대화 이력을 다시 출력
-  - **Tool 호출 상세** — `F3` 로 모달 표시 (모든 tool span 의 inputs/outputs/metadata JSON 펼쳐서 봄, 스크롤 가능)
+  - `/tool` (또는 `/tools`, `/details`) — tool 호출 상세 모달 — **`F3`**
   - `/help` — 도움말 — `F1`
   - `/quit` — 종료 (또는 `Ctrl+C`)
+- **슬래시 팔레트** — 입력창에 `/` 입력하면 명령 목록이 바로 위에 인라인 힌트로 노출 (Claude Code 스타일). 타이핑하면 실시간 필터링, `Tab` 으로 첫 매치 자동완성, `Enter` 로 실행.
 - **그래프 실행은 워커 스레드** — UI 가 프리즈되지 않음. 상태바에 `⏳ 응답 생성 중…` 표시
 - **트레이스 뷰어** — 001 의 `Tracer` 이식. 저장된 HTML 은 self-contained (브라우저로 직접 열기 권장)
 

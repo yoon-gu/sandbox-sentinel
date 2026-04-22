@@ -46,21 +46,21 @@ from langgraph.types import Command  # noqa: F401  (사용자 그래프가 impor
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
+from textual.message import Message
 from textual.screen import ModalScreen
+from textual.widget import Widget
 from textual.widgets import (
     Button,
-    Checkbox,
     Footer,
     Header,
     Input,
     Label,
-    RadioButton,
-    RadioSet,
+    OptionList,
     RichLog,
     Static,
-    TextArea,
 )
+from rich.text import Text
 
 if TYPE_CHECKING:
     pass
@@ -301,203 +301,86 @@ class ChatEngine:
         return assistant, interrupt_payload
 
 
-# ===== 4. HITL Modal Screens =====
-# 세 가지 HITL 유형별로 모달 화면을 띄운 뒤 사용자 답변을 받아서 ChatApp 에 전달.
+# ===== 4. 인라인 HITL 위젯 =====
+# HITL 유형별로 입력 영역을 그대로 스왑하는 방식. 모달 팝업을 쓰지 않아
+# Claude Code 스타일의 인라인 대화 UX 를 제공한다.
+#   · 객관식 (choice) → Textual 기본 OptionList (↑↓ 이동 · Enter 선택)
+#   · 복수선택 (multi_choice) → 커스텀 _InlineMultiChoice 위젯
+#       (↑↓ 이동 · Space 토글 · Enter 제출)
+#   · 주관식 (input) → Input 위젯 (Enter 제출)
+# 세 경우 모두 Esc 로 취소 가능.
 
-class _HITLInputScreen(ModalScreen[Optional[str]]):
-    """주관식(type=input) — Textarea + 제출 버튼."""
+
+class _InlineMultiChoice(Widget):
+    """인라인 복수선택 리스트.
+
+    체크박스 그룹을 한 줄씩 Rich Text 로 직접 렌더해서 포커스 커서(▸) / 토글 상태
+    ([ ] / [x]) 를 표시한다. Textual 기본 SelectionList 의 Enter 동작(토글) 을
+    피하고 Enter 를 '제출' 으로 쓸 수 있도록 커스텀 위젯으로 만듬.
+    """
+
+    can_focus = True
 
     DEFAULT_CSS = """
-    _HITLInputScreen { align: center middle; }
-    _HITLInputScreen > Vertical {
-        width: 80; height: auto; padding: 1 2;
-        border: thick $warning; background: $surface;
+    _InlineMultiChoice {
+        height: auto; min-height: 3; max-height: 10;
+        padding: 0 1; border: solid ;
     }
-    _HITLInputScreen Label.banner {
-        text-style: bold; color: $warning; margin-bottom: 1;
-    }
-    _HITLInputScreen TextArea { height: 6; margin-bottom: 1; }
-    _HITLInputScreen Horizontal { align: right middle; }
-    _HITLInputScreen Button { margin-left: 1; }
+    _InlineMultiChoice:focus { border: solid ; }
     """
 
     BINDINGS = [
-        # priority=True 로 widget-level 입력(예: TextArea/Checkbox 자체 keymap) 보다 먼저 매칭
+        Binding("up", "cursor_up", "위", show=False),
+        Binding("down", "cursor_down", "아래", show=False),
+        Binding("space", "toggle", "체크", show=False),
+        Binding("enter", "submit", "제출", show=False, priority=True),
         Binding("escape", "cancel", "취소", show=False, priority=True),
-        # Ctrl+S 는 터미널 XON/XOFF 에 잡혀 불가 → Alt+Enter + F2 병행 + 버튼 클릭도 가능
-        Binding("alt+enter", "submit", "제출", show=True, priority=True),
-        Binding("f2", "submit", "F2 제출", show=False, priority=True),
     ]
 
-    def __init__(self, question: str) -> None:
-        super().__init__()
-        self.question = question
+    class Submitted(Message):
+        """사용자가 Enter 로 현재 체크 상태를 제출."""
+        def __init__(self, values: list[str]) -> None:
+            super().__init__()
+            self.values = values
 
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label(f"🤚 LLM 이 사용자에게 질문 · 주관식", classes="banner")
-            yield Label(self.question)
-            yield TextArea(id="answer-input")
-            with Horizontal():
-                yield Button("취소", id="cancel-btn", variant="default")
-                yield Button("제출 (Alt+Enter · F2)", id="submit-btn", variant="success")
+    class Cancelled(Message):
+        """사용자가 Esc 로 취소."""
 
-    def on_mount(self) -> None:
-        self.query_one("#answer-input", TextArea).focus()
-
-    def action_submit(self) -> None:
-        value = self.query_one("#answer-input", TextArea).text.strip()
-        if value:
-            self.dismiss(value)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "submit-btn":
-            self.action_submit()
-        elif event.button.id == "cancel-btn":
-            self.action_cancel()
-
-
-class _HITLChoiceScreen(ModalScreen[Optional[str]]):
-    """객관식(type=choice) — RadioSet + 제출."""
-
-    DEFAULT_CSS = """
-    _HITLChoiceScreen { align: center middle; }
-    _HITLChoiceScreen > Vertical {
-        width: 80; height: auto; padding: 1 2;
-        border: thick $warning; background: $surface;
-    }
-    _HITLChoiceScreen Label.banner {
-        text-style: bold; color: $warning; margin-bottom: 1;
-    }
-    _HITLChoiceScreen RadioSet { margin: 1 0; }
-    _HITLChoiceScreen Horizontal { align: right middle; }
-    _HITLChoiceScreen Button { margin-left: 1; }
-    """
-
-    BINDINGS = [
-        Binding("escape", "cancel", "취소", show=False),
-        # Enter 는 RadioSet 이 흡수하므로 (포커스된 옵션 토글), 제출은 Ctrl+S 로 통일
-        Binding("ctrl+s", "submit", "제출", show=True),
-    ]
-
-    def __init__(self, question: str, options: list[str]) -> None:
-        super().__init__()
-        self.question = question
+    def __init__(self, options: list[str], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
         self.options = options or ["(옵션 없음)"]
+        self.selected_flags: list[bool] = [False] * len(self.options)
+        self.focused_idx: int = 0
 
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label(f"🤚 LLM 이 사용자에게 질문 · 객관식", classes="banner")
-            yield Label(self.question)
-            with RadioSet(id="choice-set"):
-                # 첫 옵션을 기본 선택 (Textual 의 RadioSet.pressed_index 는 read-only
-                # property 라 mount 후 setter 할당이 불가. RadioButton value 로 지정.)
-                for i, opt in enumerate(self.options):
-                    yield RadioButton(opt, value=(i == 0))
-            with Horizontal():
-                yield Button("취소", id="cancel-btn", variant="default")
-                yield Button("제출 (Alt+Enter · F2)", id="submit-btn", variant="success")
-
-    def on_mount(self) -> None:
-        self.query_one("#choice-set", RadioSet).focus()
-
-    def action_submit(self) -> None:
-        rs = self.query_one("#choice-set", RadioSet)
-        idx = rs.pressed_index
-        if 0 <= idx < len(self.options):
-            self.dismiss(self.options[idx])
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "submit-btn":
-            self.action_submit()
-        elif event.button.id == "cancel-btn":
-            self.action_cancel()
-
-
-class _HITLMultiChoiceScreen(ModalScreen[Optional[list[str]]]):
-    """복수선택(type=multi_choice) — Checkbox 여러 개 + 제출."""
-
-    DEFAULT_CSS = """
-    _HITLMultiChoiceScreen { align: center middle; }
-    _HITLMultiChoiceScreen > Vertical {
-        width: 80; height: auto; padding: 1 2;
-        border: thick $warning; background: $surface;
-    }
-    _HITLMultiChoiceScreen Label.banner {
-        text-style: bold; color: $warning; margin-bottom: 1;
-    }
-    _HITLMultiChoiceScreen VerticalScroll {
-        max-height: 12; border: solid $primary; padding: 0 1; margin: 1 0;
-    }
-    _HITLMultiChoiceScreen Horizontal { align: right middle; }
-    _HITLMultiChoiceScreen Button { margin-left: 1; }
-    _HITLMultiChoiceScreen Label.hint {
-        color: $text-muted; text-style: italic;
-    }
-    """
-
-    BINDINGS = [
-        # priority=True 로 widget-level 입력(예: TextArea/Checkbox 자체 keymap) 보다 먼저 매칭
-        Binding("escape", "cancel", "취소", show=False, priority=True),
-        # Ctrl+S 는 터미널 XON/XOFF 에 잡혀 불가 → Alt+Enter + F2 병행 + 버튼 클릭도 가능
-        Binding("alt+enter", "submit", "제출", show=True, priority=True),
-        Binding("f2", "submit", "F2 제출", show=False, priority=True),
-    ]
-
-    def __init__(self, question: str, options: list[str]) -> None:
-        super().__init__()
-        self.question = question
-        self.options = options or ["(옵션 없음)"]
-
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label(f"🤚 LLM 이 사용자에게 질문 · 복수선택", classes="banner")
-            yield Label(self.question)
-            yield Label("✓ 스페이스로 체크, Alt+Enter(또는 F2) 로 제출 — 최소 1개 체크 필요", classes="hint")
-            with VerticalScroll():
-                for i, opt in enumerate(self.options):
-                    yield Checkbox(opt, id=f"cb-{i}")
-            with Horizontal():
-                yield Button("취소", id="cancel-btn", variant="default")
-                yield Button("제출 (Alt+Enter · F2)", id="submit-btn", variant="success")
-
-    def on_mount(self) -> None:
-        # 첫 체크박스에 포커스
-        try:
-            self.query_one("#cb-0", Checkbox).focus()
-        except Exception:
-            pass
-
-    def _selected(self) -> list[str]:
-        selected: list[str] = []
+    def render(self) -> Text:
+        text = Text()
         for i, opt in enumerate(self.options):
-            try:
-                cb = self.query_one(f"#cb-{i}", Checkbox)
-                if cb.value:
-                    selected.append(opt)
-            except Exception:
-                pass
-        return selected
+            marker = "▸" if i == self.focused_idx else " "
+            check = "[x]" if self.selected_flags[i] else "[ ]"
+            style = "bold cyan" if i == self.focused_idx else ""
+            text.append(f"{marker} {check} {opt}\n", style=style)
+        return text
+
+    def action_cursor_up(self) -> None:
+        if self.focused_idx > 0:
+            self.focused_idx -= 1
+            self.refresh()
+
+    def action_cursor_down(self) -> None:
+        if self.focused_idx < len(self.options) - 1:
+            self.focused_idx += 1
+            self.refresh()
+
+    def action_toggle(self) -> None:
+        self.selected_flags[self.focused_idx] = not self.selected_flags[self.focused_idx]
+        self.refresh()
 
     def action_submit(self) -> None:
-        selected = self._selected()
-        if selected:
-            self.dismiss(selected)
+        selected = [self.options[i] for i, flag in enumerate(self.selected_flags) if flag]
+        self.post_message(self.Submitted(selected))
 
     def action_cancel(self) -> None:
-        self.dismiss(None)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "submit-btn":
-            self.action_submit()
-        elif event.button.id == "cancel-btn":
-            self.action_cancel()
+        self.post_message(self.Cancelled())
 
 
 class _ToolDetailsScreen(ModalScreen[None]):
@@ -578,16 +461,37 @@ class _ToolDetailsScreen(ModalScreen[None]):
             self.action_close()
 
 
-# ===== 5. 메인 Textual 앱 =====
+# ===== 5. 메인 Textual 앱 (인라인 HITL 버전) =====
 
-_SLASH_COMMANDS = ("/new", "/trace", "/history", "/help", "/quit")
+_SLASH_COMMANDS = ("/new", "/trace", "/history", "/tool", "/help", "/quit")
+
+# 슬래시 팔레트 표시용 — (명령, 짧은 설명)
+_SLASH_PALETTE: tuple[tuple[str, str], ...] = (
+    ("/new", "새 thread 로 리셋 (Ctrl+N)"),
+    ("/trace", "트레이스 HTML 저장 (Ctrl+T)"),
+    ("/history", "대화 이력 다시 출력"),
+    ("/tool", "Tool 호출 상세 모달 (F3)"),
+    ("/help", "도움말 (F1)"),
+    ("/quit", "종료 (Ctrl+C)"),
+)
 
 
 class ChatApp(App[None]):
     """LangGraph 챗봇 REPL — Claude Code 스타일 풀스크린 TUI.
 
-    상단: 대화 히스토리 (스크롤) · 상태바 · 하단: 입력창
-    HITL 는 모달 화면으로 띄움 (주관식=TextArea / 객관식=RadioSet / 복수선택=Checkbox)
+    레이아웃 (세로):
+      · Header
+      · RichLog  — 대화 히스토리 (스크롤 가능)
+      · Static   — 상태바
+      · Static   — HITL 배너 (기본 hidden, HITL 활성화 시 노출)
+      · Container — 입력 영역 (모드별로 children 스왑)
+          · 일반 대화: Input
+          · 객관식 HITL: OptionList (↑↓ 이동, Enter 선택)
+          · 복수선택 HITL: _InlineMultiChoice (↑↓ 이동, Space 토글, Enter 제출)
+          · 주관식 HITL: Input (Enter 제출, placeholder=질문)
+      · Footer
+
+    모든 HITL 인터랙션은 Enter / ↑↓ / Space / Esc 만 사용 — 팝업 모달 없음.
     """
 
     CSS = """
@@ -604,54 +508,239 @@ class ChatApp(App[None]):
         color: $text-muted;
         padding: 0 1;
     }
-    #input {
-        height: 3;
-        margin: 0 0 0 0;
+    #hitl-banner {
+        height: 2;
+        padding: 0 1;
+        background: $warning 20%;
+        color: $warning;
+        text-style: bold;
+    }
+    #hitl-banner.hidden { display: none; }
+    #slash-hint {
+        height: auto; max-height: 8;
+        padding: 0 1;
+        background: $panel;
+        color: $text;
+        border-left: thick $accent;
+    }
+    #slash-hint.hidden { display: none; }
+    #input-wrap {
+        height: auto; min-height: 3; max-height: 12;
+        padding: 0;
+    }
+    #main-input, #hitl-input { margin: 0; }
+    #hitl-choice, #hitl-multi {
+        height: auto; max-height: 10;
     }
     """
 
     BINDINGS = [
         Binding("ctrl+c", "quit", "종료"),
         Binding("ctrl+n", "cmd_new", "새 대화"),
-        Binding("ctrl+t", "cmd_trace", "트레이스 저장"),
+        Binding("ctrl+t", "cmd_trace", "트레이스"),
         Binding("f3", "cmd_tool_details", "Tool 상세"),
         Binding("f1", "cmd_help", "도움말"),
+        # Esc 는 HITL 활성화 상태에서만 동작 (일반 모드에서는 무시)
+        Binding("escape", "cancel_hitl", "HITL 취소", show=False),
+        # Tab 은 main-input 이 '/' 로 시작하는 일반 모드일 때만 자동완성 (check_action 조건)
+        Binding("tab", "slash_autocomplete", "슬래시 자동완성", show=False, priority=True),
     ]
+
+    def check_action(self, action: str, parameters: tuple) -> Optional[bool]:
+        """Tab 바인딩을 조건부로만 활성화해서, 그 외엔 Input 의 기본 Tab(포커스 이동) 유지."""
+        if action == "slash_autocomplete":
+            try:
+                main = self.query_one("#main-input", Input)
+            except Exception:
+                return False
+            return (
+                self._hitl_mode is None
+                and main.has_focus
+                and main.value.startswith("/")
+            )
+        return True
+
+    def action_slash_autocomplete(self) -> None:
+        main = self.query_one("#main-input", Input)
+        lower = main.value.lower()
+        matches = [cmd for cmd, _ in _SLASH_PALETTE if cmd.startswith(lower)]
+        if matches:
+            main.value = matches[0]
+            main.cursor_position = len(main.value)
 
     TITLE = "LangGraph Chat REPL"
 
     def __init__(self, engine: ChatEngine) -> None:
         super().__init__()
         self.engine = engine
+        self._hitl_mode: Optional[str] = None  # None | "choice" | "multi" | "input"
 
     # ----- 레이아웃 구성 -----
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield RichLog(id="history", highlight=True, markup=True, wrap=True, auto_scroll=True)
         yield Static(id="status")
-        yield Input(
-            id="input",
-            placeholder="메시지 입력 · /help · Ctrl+N=새 대화 · Ctrl+T=트레이스 · F3=Tool 상세 · F1=도움말",
-        )
+        yield Static("", id="hitl-banner", classes="hidden")
+        # 슬래시 팔레트 — 사용자가 '/' 로 시작하는 입력을 하면 인라인 힌트로 노출
+        yield Static("", id="slash-hint", classes="hidden")
+        # main-input 은 항상 DOM 에 존재 (HITL 모드에서 display:none 으로 숨김).
+        # HITL 위젯은 _enter_hitl 시 동적으로 mount, _enter_normal_mode 시 remove.
+        with Container(id="input-wrap"):
+            yield Input(
+                id="main-input",
+                placeholder="메시지 입력 · /help · ↑↓=선택 · Enter=전송 · Esc=HITL 취소 · Tab=슬래시 자동완성",
+            )
         yield Footer()
 
     def on_mount(self) -> None:
         self._write_banner()
         self._update_status()
-        self.query_one(Input).focus()
+        self._enter_normal_mode()
+
+    # ----- 모드 전환 -----
+    def _remove_hitl_widgets(self) -> None:
+        """HITL 위젯(hitl-choice/hitl-multi/hitl-input) 이 있으면 제거."""
+        for wid_id in ("hitl-choice", "hitl-multi", "hitl-input"):
+            try:
+                self.query_one(f"#{wid_id}").remove()
+            except Exception:
+                pass
+
+    def _show_main_input(self, show: bool) -> None:
+        main = self.query_one("#main-input", Input)
+        main.display = show
+        if show:
+            main.value = ""
+            main.focus()
+
+    def _enter_normal_mode(self) -> None:
+        self._hitl_mode = None
+        self.query_one("#hitl-banner", Static).add_class("hidden")
+        self._remove_hitl_widgets()
+        self._show_main_input(True)
+
+    def _enter_hitl(self, payload: dict) -> None:
+        qtype = payload.get("type", "input")
+        question = str(payload.get("question") or "")
+        options = list(payload.get("options") or [])
+        # HITL 진입 시 슬래시 힌트는 숨긴다 (일반 모드로 돌아가면 다시 Input.Changed 가 복원)
+        self._hide_slash_hint()
+
+        label = {"choice": "객관식", "multi_choice": "복수선택"}.get(qtype, "주관식")
+        hints = {
+            "choice": "↑↓ 이동 · Enter 선택 · Esc 취소",
+            "multi_choice": "↑↓ 이동 · Space 체크 · Enter 제출 · Esc 취소",
+            "input": "Enter 제출 · Esc 취소",
+        }[qtype]
+        banner = self.query_one("#hitl-banner", Static)
+        banner.remove_class("hidden")
+        banner.update(
+            f"🤚 [bold yellow]{label}[/bold yellow]  {question}\n"
+            f"[dim]{hints}[/dim]"
+        )
+
+        # 이전 HITL 위젯 제거 + main-input 숨김
+        self._remove_hitl_widgets()
+        self._show_main_input(False)
+
+        wrap = self.query_one("#input-wrap", Container)
+        if qtype == "choice":
+            self._hitl_mode = "choice"
+            opts = options or ["(옵션 없음)"]
+            widget = OptionList(*opts, id="hitl-choice")
+            wrap.mount(widget)
+            widget.focus()
+        elif qtype == "multi_choice":
+            self._hitl_mode = "multi"
+            widget = _InlineMultiChoice(options, id="hitl-multi")
+            wrap.mount(widget)
+            widget.focus()
+        else:  # input (주관식)
+            self._hitl_mode = "input"
+            widget = Input(id="hitl-input", placeholder=f"답변 입력 후 Enter — {question}")
+            wrap.mount(widget)
+            widget.focus()
+
+    def action_cancel_hitl(self) -> None:
+        """Esc — HITL 모드일 때만 취소 (그래프의 pending_interrupt 는 유지)."""
+        if self._hitl_mode is None:
+            return
+        self._write_system(
+            "[yellow]HITL 취소. 그래프는 여전히 사용자 응답 대기 중입니다. "
+            "같은 트리거 문구를 다시 보내거나 /new 로 리셋하세요.[/yellow]"
+        )
+        # 일반 모드로 복귀하지 않고, 일단 입력창을 일반 Input 으로 되돌린다.
+        # 하지만 pending_interrupt 는 엔진에 남아있으므로 다음 chat() 에서 에러 발생 가능.
+        # → 사용자에게 명확히 안내하고 normal mode 로 전환.
+        self._enter_normal_mode()
 
     # ----- 입력 처리 -----
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        text = event.value.strip()
-        # 입력 비우기 (이후 처리 중에도 다음 입력 받을 수 있게)
-        self.query_one(Input).value = ""
-        if not text:
+        """Input 위젯의 Enter — id 로 일반 vs HITL 분기."""
+        value = event.value.strip()
+        event.input.value = ""
+        if event.input.id == "main-input":
+            self._hide_slash_hint()
+            if not value:
+                return
+            if value.startswith("/"):
+                self._handle_command(value)
+            else:
+                self._submit_chat(value)
+        elif event.input.id == "hitl-input":
+            if not value:
+                return
+            self._submit_resume(value)
+            # 모드 전환은 worker 결과 도착 시 _on_turn_result 가 처리
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Main input 이 '/' 로 시작하면 슬래시 팔레트 힌트를 인라인 노출."""
+        if event.input.id != "main-input":
             return
-        if text.startswith("/"):
-            self._handle_command(text)
+        value = event.value
+        if value.startswith("/"):
+            self._show_slash_hint(value)
+        else:
+            self._hide_slash_hint()
+
+    def _show_slash_hint(self, prefix: str) -> None:
+        hint = self.query_one("#slash-hint", Static)
+        lower = prefix.lower()
+        matches = [(cmd, desc) for cmd, desc in _SLASH_PALETTE if cmd.startswith(lower)]
+        if not matches:
+            hint.update(
+                f"[dim]알려진 슬래시 명령이 없습니다. Tab 으로 첫 매치 자동완성, "
+                f"또는 다음 중 선택:[/dim]\n"
+                + "  ".join(f"[cyan]{cmd}[/cyan]" for cmd, _ in _SLASH_PALETTE)
+            )
+            hint.remove_class("hidden")
             return
-        # 일반 메시지 → 그래프 실행
-        self._submit_chat(text)
+        lines = [
+            f"  [cyan]{cmd}[/cyan]  [dim]— {desc}[/dim]"
+            for cmd, desc in matches
+        ]
+        lines.append(f"[dim]  (Tab 으로 첫 매치 자동완성 · Enter 로 실행)[/dim]")
+        hint.update("\n".join(lines))
+        hint.remove_class("hidden")
+
+    def _hide_slash_hint(self) -> None:
+        self.query_one("#slash-hint", Static).add_class("hidden")
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """객관식 — Enter 로 옵션 선택."""
+        if event.option_list.id != "hitl-choice":
+            return
+        # event.option 은 Option 인스턴스. prompt 가 표시 문자열.
+        answer = str(event.option.prompt)
+        self._submit_resume(answer)
+
+    def on__inline_multi_choice_submitted(self, event: "_InlineMultiChoice.Submitted") -> None:
+        """복수선택 — Enter 로 제출 (선택된 list)."""
+        self._submit_resume(list(event.values))
+
+    def on__inline_multi_choice_cancelled(self, event: "_InlineMultiChoice.Cancelled") -> None:
+        """복수선택 — Esc 로 취소 (우선순위 바인딩으로 여기로 먼저 온다)."""
+        self.action_cancel_hitl()
 
     # ----- 슬래시 명령 -----
     def _handle_command(self, cmd: str) -> None:
@@ -664,6 +753,8 @@ class ChatApp(App[None]):
             self.action_cmd_trace()
         elif head == "/history":
             self._show_history()
+        elif head in ("/tool", "/tools", "/details"):
+            self.action_cmd_tool_details()
         elif head == "/help":
             self.action_cmd_help()
         else:
@@ -675,6 +766,7 @@ class ChatApp(App[None]):
         self._write_banner()
         self._write_system(f"새 thread 로 리셋됨 → [cyan]{new_id}[/cyan]")
         self._update_status()
+        self._enter_normal_mode()
 
     def action_cmd_trace(self) -> None:
         ts = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -697,13 +789,16 @@ class ChatApp(App[None]):
             "  [cyan]/new[/cyan]      새 thread 로 리셋 (맥락 끊기, Tracer 유지)  — Ctrl+N\n"
             "  [cyan]/trace[/cyan]    현재 트레이스를 HTML 파일로 저장            — Ctrl+T\n"
             "  [cyan]/history[/cyan]  현재 thread 의 대화 이력을 다시 출력\n"
-            "  [cyan]Tool 상세[/cyan]  최근 tool 호출들의 inputs/outputs/meta 모달 — [yellow]F3[/yellow]\n"
+            "  [cyan]/tool[/cyan]     최근 tool 호출의 inputs/outputs 모달         — [yellow]F3[/yellow]\n"
             "  [cyan]/help[/cyan]     이 도움말                                    — F1\n"
             "  [cyan]/quit[/cyan]     종료                                         — Ctrl+C\n\n"
-            "[bold]HITL 모달 안에서[/bold]\n"
-            "  제출: [yellow]Alt+Enter[/yellow] 또는 [yellow]F2[/yellow] (터미널에서 Ctrl+S 는 XON/XOFF 에 잡혀 안 됨)\n"
-            "  취소: Escape\n"
-            "  객관식: ↑/↓ 로 이동, 복수선택: Space 로 체크 토글\n\n"
+            "[bold]HITL 인터랙션 (입력창이 자동 전환)[/bold]\n"
+            "  객관식   : ↑↓ 로 이동 · [yellow]Enter[/yellow] 로 선택 · Esc 로 취소\n"
+            "  복수선택 : ↑↓ 로 이동 · [yellow]Space[/yellow] 로 체크 토글 · Enter 로 제출\n"
+            "  주관식   : 답변 입력 후 Enter · Esc 로 취소\n\n"
+            "[bold]슬래시 팔레트[/bold]\n"
+            "  입력창에 [cyan]/[/cyan] 입력하면 명령 목록 힌트가 바로 위에 노출됨\n"
+            "  [cyan]Tab[/cyan] 키로 첫 매치를 자동완성, [cyan]Enter[/cyan] 로 실행\n\n"
             "[bold]HITL 트리거 (MockLLM 기준)[/bold]\n"
             "  복수선택: 여러, 복수, 해당, 체크, 모두\n"
             "  객관식  : 추천, 고를, 고르, 골라, 선택지, 옵션\n"
@@ -712,7 +807,7 @@ class ChatApp(App[None]):
         self._write_system(help_text)
 
     def action_cmd_tool_details(self) -> None:
-        """F3 — 실제 tool 호출 (name 이 'tool:' 로 시작하는 span) 만 모달 표시.
+        """F3 또는 /tool — 실제 tool 호출 (name 이 'tool:' 로 시작하는 span) 만 모달 표시.
 
         `kind=="tool"` 에는 HITL 응답(`human:answered`) 도 포함되지만 사용자 요청은
         "도구 설명" 이므로 name prefix 로 좁혀서 실제 외부 도구 호출만 노출.
@@ -727,13 +822,12 @@ class ChatApp(App[None]):
     def _submit_chat(self, text: str) -> None:
         self._write_user(text)
         self._set_status_busy("응답 생성 중…")
-        # 그래프 호출을 워커 스레드로 — UI 프리즈 방지
         self.run_worker(self._run_chat_worker(text), exclusive=True, thread=True)
 
     def _submit_resume(self, answer: Any) -> None:
         # 사용자 응답을 대화에 한 줄 추가 (list 면 합쳐서)
         if isinstance(answer, (list, tuple)):
-            display = ", ".join(str(a) for a in answer)
+            display = ", ".join(str(a) for a in answer) if answer else "(선택 없음)"
         else:
             display = str(answer)
         self._write_user(display, label="answer")
@@ -756,39 +850,22 @@ class ChatApp(App[None]):
 
     # ----- 워커 결과 처리 (메인 스레드) -----
     def _on_turn_result(self, assistant: str, interrupt_payload: Optional[dict]) -> None:
-        # tool 스팬이 새로 쌓였으면 표시 (간이 — 마지막 tool span 1건만)
         self._render_recent_tool_calls()
         self._write_assistant(assistant)
         self._update_status()
         if interrupt_payload:
-            self._open_hitl(interrupt_payload)
+            # 바로 인라인 HITL 모드로 전환 (팝업 없음)
+            self._enter_hitl(interrupt_payload)
+        else:
+            # 일반 대화로 복귀
+            self._enter_normal_mode()
 
     def _on_turn_error(self, e: Exception) -> None:
         self._write_error(f"{type(e).__name__}: {e}")
         self._update_status()
-
-    # ----- HITL 모달 오픈 -----
-    def _open_hitl(self, payload: dict) -> None:
-        qtype = payload.get("type", "input")
-        question = payload.get("question", "사용자 응답이 필요합니다.")
-        options = list(payload.get("options") or [])
-
-        def _after(answer: Any) -> None:
-            if answer is None:
-                # 사용자가 취소 — pending_interrupt 는 유지되므로 안내만 표시
-                self._write_system(
-                    "[yellow]HITL 취소됨. 그래프는 여전히 사용자 응답을 기다리는 중입니다. "
-                    "다시 이어가려면 /help 의 HITL 트리거로 재시도하거나 /new 로 리셋하세요.[/yellow]"
-                )
-                return
-            self._submit_resume(answer)
-
-        if qtype == "choice":
-            self.push_screen(_HITLChoiceScreen(question, options), _after)
-        elif qtype == "multi_choice":
-            self.push_screen(_HITLMultiChoiceScreen(question, options), _after)
-        else:
-            self.push_screen(_HITLInputScreen(question), _after)
+        # 오류 시에도 일반 모드로 복귀해 다음 입력을 받을 수 있게
+        if self._hitl_mode is not None:
+            self._enter_normal_mode()
 
     # ----- 렌더링 헬퍼 -----
     def _log(self) -> RichLog:
@@ -797,15 +874,15 @@ class ChatApp(App[None]):
     def _write_banner(self) -> None:
         log = self._log()
         log.write(
-            f"[bold cyan]╭─ LangGraph Chat REPL ·[/bold cyan] "
-            f"thread: [cyan]{self.engine.thread_id}[/cyan] "
-            f"[bold cyan]────────────────────────────────╮[/bold cyan]"
+            f"[bold cyan]╭─ LangGraph Chat REPL[/bold cyan] · "
+            f"thread [cyan]{self.engine.thread_id}[/cyan] "
+            f"[bold cyan]─────────────────────────╮[/bold cyan]"
         )
         log.write(
-            "[dim]  /help 로 명령어 확인 · Ctrl+C 로 종료 · HITL 은 모달로 표시됩니다[/dim]"
+            "[dim]  /help 로 명령어 확인 · Ctrl+C 종료 · HITL 은 입력창이 직접 전환됩니다[/dim]"
         )
         log.write(
-            f"[bold cyan]╰────────────────────────────────────────────────────────────────╯[/bold cyan]"
+            "[bold cyan]╰────────────────────────────────────────────────────────╯[/bold cyan]"
         )
         log.write("")
 
@@ -813,7 +890,6 @@ class ChatApp(App[None]):
         self._log().write(f"[bold green]● {label}[/bold green]  {text}")
 
     def _write_assistant(self, text: str) -> None:
-        # 여러 줄일 경우 각 줄에 들여쓰기
         lines = (text or "").splitlines() or [""]
         self._log().write(f"[bold cyan]● bot[/bold cyan]  {lines[0]}")
         for ln in lines[1:]:
@@ -829,12 +905,10 @@ class ChatApp(App[None]):
         self._log().write(f"[bold red]● error[/bold red]  {text}")
 
     def _render_recent_tool_calls(self) -> None:
-        """직전 턴에서 생긴 tool span 을 한 줄씩 표시."""
-        # 마지막 "turn" chain span 을 찾아 그 이후의 tool span 들을 출력
+        """직전 턴에서 생긴 tool span 을 한 줄씩 표시 (human:answered 는 제외)."""
         spans = self.engine.tracer.spans
         if not spans:
             return
-        # 가장 최근 루트 chain span 이후의 tool span 만
         last_root_start_idx = 0
         for i in range(len(spans) - 1, -1, -1):
             if spans[i].parent_id is None and spans[i].kind == "chain":
@@ -842,7 +916,7 @@ class ChatApp(App[None]):
                 break
         recent_tools = [
             s for s in spans[last_root_start_idx:]
-            if s.kind == "tool"
+            if s.kind == "tool" and s.name.startswith("tool:")
         ]
         for s in recent_tools:
             out = s.outputs
@@ -873,14 +947,12 @@ class ChatApp(App[None]):
                 self._write_system(f"[{role}] {content}")
 
     def _set_status_busy(self, msg: str) -> None:
-        self.query_one("#status", Static).update(
-            f"[yellow]⏳ {msg}[/yellow]"
-        )
+        self.query_one("#status", Static).update(f"[yellow]⏳ {msg}[/yellow]")
 
     def _update_status(self) -> None:
         s = self.engine.summary()
         parts = [
-            f"thread: [cyan]{self.engine.thread_id}[/cyan]",
+            f"thread [cyan]{self.engine.thread_id}[/cyan]",
             f"LLM {s['llm_calls']}회",
             f"tokens in/out {s['tokens_in']}/{s['tokens_out']}",
             f"latency {s['root_latency_ms']:.0f} ms",
