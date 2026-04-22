@@ -2,27 +2,71 @@
 #
 # 이 스택은 "사내 미러에 일반적으로 등록되어 있다고 가정해도 괜찮은" 최소 공통 집합입니다.
 # 실제 운영 환경이 다르면 같은 디렉토리에 새 YAML을 추가하고 active_stack.txt를 변경하세요.
+#
+# 기준일: 2026-04-22 (폐쇄망 Python 환경 스펙)
 
 name: default
 description: |
-  데이터 사이언스/분석 베이스라인. Python 3.9 기준의 표준 패키지와
-  PyTorch + LangGraph 만 추가로 가정합니다.
-python: "3.9"
+  폐쇄망 베이스라인. Python 3.11 / CUDA 12.4 기준이며
+  Jupyter 커널, ML 스택(scikit-learn/scipy/sagemaker), LLM 스택(torch + HuggingFace +
+  LangChain/LangGraph 계열)을 포함합니다.
+
+python: "3.11"
+cuda: "12.4"
 
 allowed_packages:
-  # 표준 라이브러리는 항상 허용 (별도 명시 불필요)
+  # ── 표준 DS 스택 (버전 미고정: 환경에 설치된 버전 사용) ──
   - numpy
-  - scipy
   - pandas
-  - scikit-learn
   - matplotlib
-  - torch
-  - langgraph
-  - psutil               # 2026-04-18 추가 (시스템 리소스 모니터링)
+  - psutil                        # 2026-04-18 추가 (시스템 리소스 모니터링)
 
-  # export 단계 한정 패키지 (런타임 코어에는 import 금지, examples/export_*.py 에서만 허용)
-  # 변환 작업의 본체 코드는 이 패키지에 의존하지 않아야 함
-  - acryl-datahub        # DataHub 메타데이터 emit 용 (003-datahub-lite 의 export 경로)
+  # ── Jupyter / Notebook ──
+  - ipykernel
+  - ipython
+
+  # ── ML / Data Science ──
+  - scikit-learn
+  - scipy
+  - sagemaker
+
+  # ── LLM / Deep Learning ──
+  - torch                         # CUDA 12.4 빌드 (torch==2.4.0+cu124)
+  - transformers
+  - huggingface-hub
+
+  # ── LangChain / LangGraph 생태계 ──
+  - langchain
+  - langgraph
+  - langgraph-supervisor
+  - deepagents
+
+  # ── 템플릿 / 기타 ──
+  - jinja2                        # HTML 템플릿 렌더링 (self-contained HTML 생성 시)
+
+# 버전 핀 (2026-04-22 기준 폐쇄망 스펙)
+# allowed_packages 에 포함된 패키지 중 사내 미러에 **정확히 이 버전**으로 등록된 항목입니다.
+# 변환물 코드를 작성할 때 이 버전과의 호환성을 반드시 확인하세요.
+package_versions:
+  # Jupyter
+  ipykernel: "6.29.5"
+  ipython: "8.30.0"
+
+  # ML
+  scikit-learn: "1.6.0"
+  scipy: "1.14.1"
+  sagemaker: "2.237.0"
+
+  # LLM / DL
+  torch: "2.4.0+cu124"
+  transformers: "4.49.0"
+  huggingface-hub: "0.25.5"
+
+  # LangChain / LangGraph
+  langchain: "1.2.10"
+  langgraph: "1.0.10"
+  langgraph-supervisor: "0.0.29"
+  deepagents: "0.4.5"
 
 blocked_packages:
   # HTTP 클라이언트 (외부 통신 차단)
@@ -35,8 +79,6 @@ blocked_packages:
   - fastparquet
   - h5py
   - tables               # pytables / HDF5
-  # 외부 템플릿 엔진 (string.Template/f-string으로 충분)
-  - jinja2
 
 blocked_persistence_formats:
   # 파일 확장자 단위로 영속화 금지 포맷을 정의
