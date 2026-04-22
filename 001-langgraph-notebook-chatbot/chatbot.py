@@ -560,9 +560,13 @@ class Chatbot:
     def chat_ui(self):
         """Jupyter 셀 Output 안에서 돌아가는 인터랙티브 채팅 위젯.
 
-        **레이아웃**: 좌측은 대화(이력 + 입력창 + 리셋 버튼 + 상태), 우측은 트레이스.
-        트레이스는 매 턴마다 자동 갱신되어 별도 버튼 없이 observability 를 바로 확인.
-        좁은 화면에서는 `flex_flow="row wrap"` 로 자동 줄바꿈.
+        **레이아웃**: 세로 스택 — 대화 이력 / 입력창 / [트레이스 저장 · 새 대화] 버튼 /
+        상태 / 트레이스 링크 영역.
+
+        트레이스는 **[트레이스 저장 & 링크]** 버튼을 누르면 `trace_<thread_id>_<ts>.html`
+        로 저장되고, 링크 영역에 클릭 가능한 링크가 나타납니다. 링크를 누르면 브라우저
+        새 탭에서 self-contained HTML 이 열리며 JS 가 정상 실행되어 span 트리/펼침이
+        작동합니다. (노트북 내 위젯 렌더링 파이프라인의 <script> 제약을 우회.)
 
         일반 대화에서는 입력창 + 보내기 버튼이 보이지만, LLM 이 사용자에게 되묻기로
         결정하면(= `self.pending_interrupt` 가 채워지면) 입력 영역이 동적으로 교체됩니다.
@@ -592,32 +596,25 @@ class Chatbot:
             border="1px solid #e5e5e5", border_radius="6px",
             max_height="420px", overflow="auto", padding="0",
         ))
-        # 트레이스는 버튼 없이 대화 옆에 상시 표시 — 매 턴마다 _render_trace() 가 갱신
-        trace_area = W.Output(layout=W.Layout(
-            border="1px solid #e5e5e5", border_radius="6px",
-            min_width="360px", max_height="640px",
-            overflow="auto", padding="0", flex="1",
-        ))
+        # 트레이스는 파일로 저장 + 클릭 가능한 링크를 이 영역에 표시 (노트북 내 HTML
+        # 렌더링 파이프라인의 <script>/스타일 제약을 피하기 위함). 사용자는 링크를
+        # 클릭해 브라우저 새 탭에서 JS 가 정상 실행되는 self-contained 트레이스를 본다.
+        trace_link_area = W.Output()
 
         # pending_interrupt 유무에 따라 children 이 매번 교체되는 컨테이너.
         input_container = W.VBox([])
 
+        trace_btn = W.Button(description="트레이스 저장 & 링크",
+                             button_style="info", icon="download")
         reset_btn = W.Button(description="새 대화 (thread 리셋)",
                              button_style="warning", icon="refresh")
-        toolbar = W.HBox([reset_btn])
+        toolbar = W.HBox([trace_btn, reset_btn])
 
         def _render_history():
             with history_area:
                 clear_output(wait=True)
                 display(HTML(_render_history_html(
                     self.history(), thread_id=self.thread_id)))
-
-        def _render_trace():
-            """매 턴 호출되어 trace_area 를 최신 span 트리로 갱신."""
-            with trace_area:
-                clear_output(wait=True)
-                display(HTML(self.tracer.to_html(
-                    title=f"Trace — thread {self.thread_id}")))
 
         def _update_status_ok():
             s = self.summary()
@@ -658,7 +655,6 @@ class Chatbot:
                 finally:
                     send_btn.disabled = False
                     _refresh_input()
-                    _render_trace()
 
             send_btn.on_click(_on_send)
             return W.VBox([input_box, send_btn])
@@ -721,7 +717,6 @@ class Chatbot:
                     finally:
                         submit_btn.disabled = False
                         _refresh_input()
-                        _render_trace()
 
                 submit_btn.on_click(_on_submit)
                 return W.VBox([banner, hint, box, submit_btn])
@@ -751,7 +746,6 @@ class Chatbot:
                     finally:
                         submit_btn.disabled = False
                         _refresh_input()
-                        _render_trace()
 
                 submit_btn.on_click(_on_submit)
                 return W.VBox([banner, chooser, submit_btn])
@@ -790,32 +784,55 @@ class Chatbot:
                     _build_interrupt_input(self.pending_interrupt),
                 )
 
+        def _on_trace(_btn):
+            """트레이스를 타임스탬프 파일명으로 저장하고 클릭 가능한 링크 표시."""
+            import datetime as _dt
+            ts = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+            path = f"trace_{self.thread_id}_{ts}.html"
+            self.tracer.save_html(
+                path, title=f"Trace — thread {self.thread_id} @ {ts}"
+            )
+            span_count = len(self.tracer.spans)
+            with trace_link_area:
+                clear_output(wait=True)
+                # Jupyter 파일 서버가 제공하는 상대경로 링크. target=_blank 로 새 탭.
+                # 파일은 노트북의 working directory 기준으로 저장됨.
+                display(HTML(
+                    f'<div style="font-size:12px;padding:8px 10px;'
+                    f'background:#ecfdf5;border:1px solid #86efac;'
+                    f'border-radius:6px;color:#065f46">'
+                    f'✅ 트레이스 저장됨 · {span_count} spans — '
+                    f'<a href="{_html_escape(path)}" target="_blank" '
+                    f'style="color:#047857;font-weight:500">🔗 {_html_escape(path)} 새 탭에서 열기</a>'
+                    f'</div>'
+                ))
+
         def _on_reset(_btn):
             self.reset()
             tid_label.value = self._thread_label_html()
             _render_history()
-            _render_trace()   # 리셋 후에도 Tracer 기록은 유지 — 최신 상태로 다시 그림
+            with trace_link_area:
+                clear_output(wait=True)
             _refresh_input()
             status.value = (
                 "<span style='color:#047857;font-size:11px'>"
                 "새 thread 로 리셋되었습니다.</span>"
             )
 
+        trace_btn.on_click(_on_trace)
         reset_btn.on_click(_on_reset)
 
         _render_history()
-        _render_trace()
         _refresh_input()
 
-        # 대화(좌) / 트레이스(우) 를 나란히 배치. 좁은 화면에선 자동 줄바꿈.
-        left_panel = W.VBox(
-            [tid_label, history_area, input_container, toolbar, status],
-            layout=W.Layout(flex="1", min_width="360px"),
-        )
-        return W.HBox(
-            [left_panel, trace_area],
-            layout=W.Layout(flex_flow="row wrap", gap="12px", width="100%"),
-        )
+        return W.VBox([
+            tid_label,
+            history_area,
+            input_container,
+            toolbar,
+            status,
+            trace_link_area,
+        ])
 
     def _thread_label_html(self) -> str:
         return (
