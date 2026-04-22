@@ -51,7 +51,7 @@ from chatbot import Chatbot
 bot = Chatbot()          # 새 thread_id + MockLLM
 
 # (A) 인터랙티브 UI — 셀 하나로 멀티턴 대화
-bot.chat_ui()            # 입력창 + 보내기/트레이스/리셋 버튼 + 대화 풍선
+bot.chat_ui()            # 좌: 대화 풍선 + 입력창 + 리셋 버튼 · 우: 매 턴 자동 갱신되는 트레이스
 
 # (B) 프로그래매틱 방식 — 셀 단위로 쪼개서 쓰기
 bot.chat("안녕")                    # 턴 1
