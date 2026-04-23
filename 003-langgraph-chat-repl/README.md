@@ -7,8 +7,9 @@
 | 항목 | 값 |
 |---|---|
 | 라이브러리 | [langgraph](https://github.com/langchain-ai/langgraph) (StateGraph · MemorySaver · interrupt · Command) + [Textual](https://github.com/Textualize/textual) (풀스크린 TUI) |
-| 버전 | langgraph `1.0.10` · textual (최신) |
+| 버전 | langgraph `1.0.10` · textual **`6.11.0`** (사내 미러 기준) |
 | 라이선스 | 둘 다 MIT |
+| 설치 참고 | `pip install --no-deps textual==6.11.0` *(사내 미러 규약)* |
 | 관찰성 개념 참고 | LangSmith — span / latency / tokens 개념만 (001 의 Tracer 이식) |
 
 ## 기능 요약
@@ -44,7 +45,7 @@
 | 전이 | `rich` | textual 이 요구 — 포맷 출력 |
 | 선택 | (없음) | 본체는 stdlib + 위 셋으로 완결 |
 
-> **⚠️ 스택 적합성 메모**: `textual` 은 폐쇄망 기본 스택에 **잠정 추가** 된 상태입니다 (`stacks/default.yaml` 의 주석 참고). 사내 미러에 textual 이 등록되어 있지 않으면 이 변환물은 동작하지 않습니다. 대안이 필요하면 environment-adapter Skill 로 `prompt_toolkit` (ipython 전이 의존이라 거의 항상 있음) 기반으로 재작성 가능합니다.
+> **스택 적합성**: 사내 미러에 `textual==6.11.0` 이 등록되어 있습니다 (2026-04-24 확인). 단 **`pip install --no-deps textual==6.11.0` 로 설치** — 의존성 해결은 사내 미러 제약상 별도 경로로 이뤄집니다. `rich`, `pygments` 등 textual 의 전이 의존은 사내 미러의 다른 패키지 설치 과정에서 이미 존재하거나 따로 수동 설치. 이 프로젝트 코드는 textual 6.11.0 에서 테스트 통과 (전체 HITL + 슬래시 팔레트 + F3 Tool 상세 + /trace 시나리오). textual 을 쓸 수 없는 환경이면 `prompt_toolkit` 단독 버전인 **[004-langgraph-prompt-toolkit-repl](../004-langgraph-prompt-toolkit-repl/)** 을 사용하세요.
 
 ## 사용 예시
 

@@ -753,13 +753,16 @@ class ReplApp:
         def _accept_main(buf: Buffer) -> bool:
             value = buf.text.strip()
             if not value:
-                return False
+                return False   # falsy → Buffer.reset() (빈 상태 유지)
             if value.startswith("/"):
                 self._handle_command(value)
             else:
                 self._submit_chat(value)
-            # True 를 반환하면 TextArea 가 자동으로 버퍼를 비운다
-            return True
+            # prompt_toolkit Buffer.validate_and_handle 규약:
+            #   accept_handler 가 truthy 반환 → keep_text=True, 버퍼 그대로
+            #   falsy 반환 → self.reset() 으로 버퍼 비움
+            # 우리는 submit 후 입력창을 비워야 하므로 False 를 반환
+            return False
 
         self.main_input = TextArea(
             height=1,
@@ -780,7 +783,8 @@ class ReplApp:
             if not value:
                 return False
             self._submit_resume(value)
-            return True
+            # Falsy → Buffer.reset() 으로 입력창 비움 (위 _accept_main 주석 참고)
+            return False
 
         self.hitl_input = TextArea(
             height=1,
