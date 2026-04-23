@@ -384,7 +384,7 @@ class _InlineMultiChoice(Widget):
 
 
 class _ToolDetailsScreen(ModalScreen[None]):
-    """F3 으로 띄우는 tool 호출 상세 뷰어.
+    """Ctrl+O 로 띄우는 tool 호출 상세 뷰어.
 
     현재 Tracer 에 쌓인 모든 kind='tool' span 을 inputs/outputs/metadata JSON 까지
     펼쳐 보여준다. RichLog 기반이라 PageUp/PageDown 등 스크롤 가능.
@@ -470,7 +470,7 @@ _SLASH_PALETTE: tuple[tuple[str, str], ...] = (
     ("/new", "새 thread 로 리셋 (Ctrl+N)"),
     ("/trace", "트레이스 HTML 저장 (Ctrl+T)"),
     ("/history", "대화 이력 다시 출력"),
-    ("/tool", "Tool 호출 상세 모달 (F3)"),
+    ("/tool", "Tool 호출 상세 모달 (Ctrl+O)"),
     ("/help", "도움말 (F1)"),
     ("/quit", "종료 (Ctrl+C)"),
 )
@@ -538,7 +538,7 @@ class ChatApp(App[None]):
         Binding("ctrl+c", "quit", "종료"),
         Binding("ctrl+n", "cmd_new", "새 대화"),
         Binding("ctrl+t", "cmd_trace", "트레이스"),
-        Binding("f3", "cmd_tool_details", "Tool 상세"),
+        Binding("ctrl+o", "cmd_tool_details", "Tool 상세"),
         Binding("f1", "cmd_help", "도움말"),
         # Esc 는 HITL 활성화 상태에서만 동작 (일반 모드에서는 무시)
         Binding("escape", "cancel_hitl", "HITL 취소", show=False),
@@ -789,7 +789,7 @@ class ChatApp(App[None]):
             "  [cyan]/new[/cyan]      새 thread 로 리셋 (맥락 끊기, Tracer 유지)  — Ctrl+N\n"
             "  [cyan]/trace[/cyan]    현재 트레이스를 HTML 파일로 저장            — Ctrl+T\n"
             "  [cyan]/history[/cyan]  현재 thread 의 대화 이력을 다시 출력\n"
-            "  [cyan]/tool[/cyan]     최근 tool 호출의 inputs/outputs 모달         — [yellow]F3[/yellow]\n"
+            "  [cyan]/tool[/cyan]     최근 tool 호출의 inputs/outputs 모달         — [yellow]Ctrl+O[/yellow]\n"
             "  [cyan]/help[/cyan]     이 도움말                                    — F1\n"
             "  [cyan]/quit[/cyan]     종료                                         — Ctrl+C\n\n"
             "[bold]HITL 인터랙션 (입력창이 자동 전환)[/bold]\n"
@@ -807,7 +807,7 @@ class ChatApp(App[None]):
         self._write_system(help_text)
 
     def action_cmd_tool_details(self) -> None:
-        """F3 또는 /tool — 실제 tool 호출 (name 이 'tool:' 로 시작하는 span) 만 모달 표시.
+        """Ctrl+O 또는 /tool — 실제 tool 호출 (name 이 'tool:' 로 시작하는 span) 만 모달 표시.
 
         `kind=="tool"` 에는 HITL 응답(`human:answered`) 도 포함되지만 사용자 요청은
         "도구 설명" 이므로 name prefix 로 좁혀서 실제 외부 도구 호출만 노출.
