@@ -448,15 +448,18 @@ class ReplApp:
         self._append_history(f"● error  {text}")
 
     def _write_banner(self) -> None:
-        self._append_history(
-            f"╭─ LangGraph Chat REPL (prompt_toolkit) · thread {self.engine.thread_id} ─╮"
-        )
-        self._append_history(
-            "│  /help 로 명령어 확인 · Ctrl+C 로 종료 · HITL 은 입력창에서 바로 전환  │"
-        )
-        self._append_history(
-            "╰──────────────────────────────────────────────────────────────╯"
-        )
+        # 박스 그리기 문자는 단일 폭. 한글(2 폭)을 섞으면 정렬이 깨지므로 영문으로 통일.
+        # 전체 폭을 고정해두고 Python 에서 패딩을 계산해 각 줄 길이를 맞춘다.
+        W = 64
+        tid = self.engine.thread_id
+        title = f" LangGraph Chat REPL · thread {tid} "
+        top = "╭" + title + "─" * (W - 2 - len(title)) + "╮"
+        mid_text = "  /help for commands · Ctrl+C to quit · HITL is inline"
+        mid = "│" + mid_text + " " * (W - 2 - len(mid_text)) + "│"
+        bot = "╰" + "─" * (W - 2) + "╯"
+        self._append_history(top)
+        self._append_history(mid)
+        self._append_history(bot)
 
     def _render_recent_tool_calls(self) -> None:
         """직전 턴의 tool:* span 을 히스토리에 한 줄씩 표시."""
