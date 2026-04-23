@@ -872,18 +872,18 @@ class ChatApp(App[None]):
         return self.query_one("#history", RichLog)
 
     def _write_banner(self) -> None:
+        # 영문 + 단일 폭 박스 문자로 통일해 폭 정렬 유지 (한글 혼용 시 2 폭 문자 때문에 깨짐).
         log = self._log()
-        log.write(
-            f"[bold cyan]╭─ LangGraph Chat REPL[/bold cyan] · "
-            f"thread [cyan]{self.engine.thread_id}[/cyan] "
-            f"[bold cyan]─────────────────────────╮[/bold cyan]"
-        )
-        log.write(
-            "[dim]  /help 로 명령어 확인 · Ctrl+C 종료 · HITL 은 입력창이 직접 전환됩니다[/dim]"
-        )
-        log.write(
-            "[bold cyan]╰────────────────────────────────────────────────────────╯[/bold cyan]"
-        )
+        W = 64
+        tid = self.engine.thread_id
+        title = f" LangGraph Chat REPL · thread {tid} "
+        top = "╭" + title + "─" * (W - 2 - len(title)) + "╮"
+        mid_text = "  /help for commands · Ctrl+C to quit · HITL is inline"
+        mid = "│" + mid_text + " " * (W - 2 - len(mid_text)) + "│"
+        bot = "╰" + "─" * (W - 2) + "╯"
+        log.write(f"[bold cyan]{top}[/bold cyan]")
+        log.write(f"[dim]{mid}[/dim]")
+        log.write(f"[bold cyan]{bot}[/bold cyan]")
         log.write("")
 
     def _write_user(self, text: str, label: str = "you") -> None:
