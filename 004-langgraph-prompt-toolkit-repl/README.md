@@ -44,10 +44,10 @@
   - `/new` — 새 thread · `Ctrl+N`
   - `/trace` — HTML 저장 · `Ctrl+T`
   - `/history` — 대화 이력 다시 출력
-  - `/tool` (또는 `/tools`, `/details`) — tool 상세 `F3`
+  - `/tool` (또는 `/tools`, `/details`) — tool 상세 `Ctrl+O`
   - `/help` — 도움말 · `F1`
   - `/quit` — 종료 · `Ctrl+C`
-- **Tool 상세** (`F3` 또는 `/tool`) — Tracer 의 `tool:*` span 의 `inputs` / `outputs` / `metadata` / `error` 를 **히스토리에 직접 펼침** (스크롤 가능). 모달 사용 안 함 — UX 일관성
+- **Tool 상세** (`Ctrl+O` 또는 `/tool`) — Tracer 의 `tool:*` span 의 `inputs` / `outputs` / `metadata` / `error` 를 **히스토리에 직접 펼침** (스크롤 가능). 모달 사용 안 함 — UX 일관성
 - **트레이스** — `/trace` 또는 `Ctrl+T` → `trace_<thread>_<ts>.html` 저장. 브라우저로 열면 JS 기반 span 트리 확인 (001 와 동일 포맷)
 - **그래프 실행은 `asyncio.run_in_executor` 로 백그라운드** — UI 프리즈 방지, 상태바가 `⏳ 처리중` 표시
 - **외부 네트워크 / 새 서버 / 포트 오픈 0** — 터미널 TTY 만 사용
@@ -80,7 +80,7 @@ cd 004-langgraph-prompt-toolkit-repl
 - `상황을 구체적으로 설명해줘` — 주관식 HITL 로 전환 (타이핑 · Enter)
 - `/` — 슬래시 팔레트 힌트 노출
 - `/tr` + `Tab` — `/trace` 로 자동완성
-- `/tool` 또는 `F3` — 지금까지의 tool 호출 상세를 히스토리에 펼침
+- `/tool` 또는 `Ctrl+O` — 지금까지의 tool 호출 상세를 히스토리에 펼침
 - `/new` 또는 `Ctrl+N` — 새 thread 로 리셋
 - `/quit` 또는 `Ctrl+C` — 종료
 

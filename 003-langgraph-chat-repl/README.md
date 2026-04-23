@@ -29,7 +29,7 @@
   - `/new` — 새 thread 로 리셋 (맥락 끊기, Tracer 는 유지) — `Ctrl+N`
   - `/trace` — 현재 트레이스를 `trace_<thread>_<ts>.html` 로 저장 — `Ctrl+T`
   - `/history` — 대화 이력을 다시 출력
-  - `/tool` (또는 `/tools`, `/details`) — tool 호출 상세 모달 — **`F3`**
+  - `/tool` (또는 `/tools`, `/details`) — tool 호출 상세 모달 — **`Ctrl+O`**
   - `/help` — 도움말 — `F1`
   - `/quit` — 종료 (또는 `Ctrl+C`)
 - **슬래시 팔레트** — 입력창에 `/` 입력하면 명령 목록이 바로 위에 인라인 힌트로 노출 (Claude Code 스타일). 타이핑하면 실시간 필터링, `Tab` 으로 첫 매치 자동완성, `Enter` 로 실행.
@@ -45,7 +45,7 @@
 | 전이 | `rich` | textual 이 요구 — 포맷 출력 |
 | 선택 | (없음) | 본체는 stdlib + 위 셋으로 완결 |
 
-> **스택 적합성**: 사내 미러에 `textual==6.11.0` 이 등록되어 있습니다 (2026-04-24 확인). 단 **`pip install --no-deps textual==6.11.0` 로 설치** — 의존성 해결은 사내 미러 제약상 별도 경로로 이뤄집니다. `rich`, `pygments` 등 textual 의 전이 의존은 사내 미러의 다른 패키지 설치 과정에서 이미 존재하거나 따로 수동 설치. 이 프로젝트 코드는 textual 6.11.0 에서 테스트 통과 (전체 HITL + 슬래시 팔레트 + F3 Tool 상세 + /trace 시나리오). textual 을 쓸 수 없는 환경이면 `prompt_toolkit` 단독 버전인 **[004-langgraph-prompt-toolkit-repl](../004-langgraph-prompt-toolkit-repl/)** 을 사용하세요.
+> **스택 적합성**: 사내 미러에 `textual==6.11.0` 이 등록되어 있습니다 (2026-04-24 확인). 단 **`pip install --no-deps textual==6.11.0` 로 설치** — 의존성 해결은 사내 미러 제약상 별도 경로로 이뤄집니다. `rich`, `pygments` 등 textual 의 전이 의존은 사내 미러의 다른 패키지 설치 과정에서 이미 존재하거나 따로 수동 설치. 이 프로젝트 코드는 textual 6.11.0 에서 테스트 통과 (전체 HITL + 슬래시 팔레트 + Ctrl+O Tool 상세 + /trace 시나리오). textual 을 쓸 수 없는 환경이면 `prompt_toolkit` 단독 버전인 **[004-langgraph-prompt-toolkit-repl](../004-langgraph-prompt-toolkit-repl/)** 을 사용하세요.
 
 ## 사용 예시
 

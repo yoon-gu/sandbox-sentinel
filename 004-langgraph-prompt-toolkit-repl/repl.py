@@ -23,7 +23,7 @@ LangGraph 기반 터미널 챗봇 REPL — prompt_toolkit 단독 구현 (Textual
        · input        → 자유 텍스트 입력 후 Enter
      Esc 로 어느 HITL 모드든 취소
   3) 슬래시 팔레트 — '/' 입력 시 명령 목록 인라인 힌트 + Tab 자동완성
-  4) Tool 상세 — F3 또는 /tool 로 tool 호출의 inputs/outputs 를 히스토리에 펼침
+  4) Tool 상세 — Ctrl+O 또는 /tool 로 tool 호출의 inputs/outputs 를 히스토리에 펼침
   5) 트레이스 — /trace 또는 Ctrl+T 로 self-contained HTML 저장
   6) 외부 네트워크 / 새 서버 프로세스 / 포트 오픈 0
 
@@ -288,7 +288,7 @@ _SLASH_PALETTE: tuple[tuple[str, str], ...] = (
     ("/new", "새 thread 로 리셋 (Ctrl+N)"),
     ("/trace", "트레이스 HTML 저장 (Ctrl+T)"),
     ("/history", "대화 이력 다시 출력"),
-    ("/tool", "Tool 호출 상세를 히스토리에 펼침 (F3)"),
+    ("/tool", "Tool 호출 상세를 히스토리에 펼침 (Ctrl+O)"),
     ("/help", "도움말 (F1)"),
     ("/quit", "종료 (Ctrl+C)"),
 )
@@ -644,7 +644,7 @@ class ReplApp:
                 self._write_system(f"[{role}] {content}")
 
     def _cmd_tool_details(self) -> None:
-        """F3 또는 /tool — 현재 Tracer 의 tool:* span 을 펼쳐서 히스토리에 쓴다.
+        """Ctrl+O 또는 /tool — 현재 Tracer 의 tool:* span 을 펼쳐서 히스토리에 쓴다.
 
         prompt_toolkit 에선 모달보다는 히스토리에 직접 쓰는 게 일관된 UX.
         """
@@ -681,7 +681,7 @@ class ReplApp:
             "  /new      새 thread 로 리셋 (맥락 끊기, Tracer 유지)  — Ctrl+N\n"
             "  /trace    현재 트레이스를 HTML 파일로 저장            — Ctrl+T\n"
             "  /history  현재 thread 의 대화 이력 다시 출력\n"
-            "  /tool     최근 tool 호출 상세를 히스토리에 펼침        — F3\n"
+            "  /tool     최근 tool 호출 상세를 히스토리에 펼침        — Ctrl+O\n"
             "  /help     이 도움말                                   — F1\n"
             "  /quit     종료                                        — Ctrl+C\n"
             "\n"
@@ -900,7 +900,7 @@ class ReplApp:
         def _(event):
             self._cmd_help()
 
-        @global_kb.add("f3")
+        @global_kb.add("c-o")
         def _(event):
             self._cmd_tool_details()
 
