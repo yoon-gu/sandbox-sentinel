@@ -172,6 +172,10 @@ class MockLLM:
     - 지연 시간: 출력 토큰 수 × per_token_ms
     """
 
+    # 자동 감지 우회 표식: Chatbot.__init__ 의 _looks_like_compiled_graph 가
+    # 이 표식을 보면 "이미 dict 계약을 따르는 어댑터" 로 간주하고 그대로 넘긴다.
+    _dict_invoke_contract = True
+
     def __init__(self, name: str = "mock-llm-001",
                  per_token_ms: float = 8.0, tracer: Optional[Tracer] = None):
         self.name = name
@@ -279,6 +283,179 @@ class MockLLM:
         # latency 시뮬레이션 — 실제 LLM처럼 출력 길이에 비례
         time.sleep(tokens_out * self.per_token_ms / 1000.0)
         return {"role": "assistant", "content": text}, tokens_in, tokens_out
+
+
+# ===== 3.5 LangChain create_agent / CompiledStateGraph 어댑터 =====
+#
+# Chatbot 의 LLM 계약은 본래 `invoke(messages: list[dict]) -> dict` 한 가지 이지만,
+# `langchain.agents.create_agent(...)` 같은 모던 헬퍼는 LangGraph CompiledStateGraph
+# 를 돌려준다. 그 객체는 `agent.invoke({"messages": [BaseMessage,...]})` 형태를 쓰고
+# 결과도 `{"messages": [... AIMessage]}` 로 나온다. 사용자에게는 "둘 다 그대로 꽂으세요"
+# 라고 하고 싶으니, Chatbot 내부에서 자동 감지해 아래 어댑터로 감싼다.
+
+
+def _looks_like_compiled_graph(obj) -> bool:
+    """langchain create_agent / langgraph CompiledStateGraph 인지 가벼운 duck-type 감지.
+
+    isinstance 체크 대신 인터페이스 형태로 판단해 langgraph/langchain 미설치 환경에서도
+    안전하다. 사용자 정의 어댑터에 우연히 같은 메서드들이 있으면, 클래스에
+    `_dict_invoke_contract = True` 속성을 두면 자동 감지를 건너뛴다 (MockLLM 참고).
+    """
+    if getattr(obj, "_dict_invoke_contract", False):
+        return False
+    return (
+        callable(getattr(obj, "invoke", None))
+        and callable(getattr(obj, "stream", None))
+        and callable(getattr(obj, "get_graph", None))
+    )
+
+
+class _CompiledGraphLLMAdapter:
+    """create_agent 결과(LangGraph CompiledStateGraph)를 Chatbot dict-계약에 맞춰주는 어댑터.
+
+    - 입력: list[dict] (role/content) → langchain BaseMessage 리스트로 변환해 내부 그래프에 전달
+    - 출력: 내부 그래프가 돌려준 messages 의 마지막 AIMessage 를 dict 로 추출
+    - HITL: 마지막 AIMessage 의 tool_calls 에 `ask_user` (또는 `ask_user_tool_name`) 가
+      있으면 **실제 실행하지 않고** Chatbot 의 기존 ask_user 페이로드 형식으로 변환한다.
+      그러면 외부 그래프의 _route_after_chat → _human_node → interrupt() 흐름이 그대로 발동.
+      다음 invoke 호출에서 사용자의 답변을 ToolMessage 로 끼워 넣어 내부 에이전트를 재개한다.
+
+    내부 에이전트는 **stateless** 로 호출한다 (config 미주입). 멀티턴 메모리는 외부
+    Chatbot 의 MemorySaver 가 전담하므로, 매 invoke 마다 누적된 messages 전체를 넘긴다.
+    """
+
+    # 자동 감지 자기 자신은 듀플 래핑 방지
+    _dict_invoke_contract = True
+
+    def __init__(self, agent, *, tracer: Optional[Tracer] = None,
+                 name: str = "create_agent",
+                 ask_user_tool_name: str = "ask_user"):
+        self.agent = agent
+        self.tracer = tracer
+        self.name = name
+        self.ask_user_tool_name = ask_user_tool_name
+        # 직전 turn 에 ask_user 가 호출된 경우 그 tool_call 의 id/name 을 보관해 둔다.
+        # 다음 invoke 의 마지막 user 메시지를 ToolMessage 로 변환해 끼워넣는 데 사용.
+        self._pending_ask_tool_call: Optional[dict] = None
+
+    def invoke(self, messages: list[dict]) -> dict:
+        # langchain_core 는 어댑터가 실제 사용될 때만 import (lazy)
+        from langchain_core.messages import convert_to_messages, ToolMessage
+
+        # pending tool_call 이 있으면 마지막 user 메시지를 ToolMessage 로 치환해 끼워넣는다.
+        if self._pending_ask_tool_call is not None and messages \
+                and isinstance(messages[-1], dict) \
+                and messages[-1].get("role") == "user":
+            lc_msgs = convert_to_messages(messages[:-1])
+            lc_msgs.append(ToolMessage(
+                content=str(messages[-1].get("content", "")),
+                tool_call_id=self._pending_ask_tool_call["id"],
+                name=self._pending_ask_tool_call["name"],
+            ))
+            self._pending_ask_tool_call = None
+        else:
+            lc_msgs = convert_to_messages(messages)
+
+        if self.tracer is None:
+            return self._invoke_inner(lc_msgs)
+
+        with self.tracer.span(f"LLM:{self.name}", kind="llm",
+                              inputs=messages,
+                              metadata={"model": self.name}) as s:
+            reply = self._invoke_inner(lc_msgs)
+            tokens_in = sum(len(str(m.get("content", "")).split()) for m in messages)
+            tokens_out = len(str(reply.get("content", "")).split())
+            self.tracer.finish(s, outputs=reply,
+                               tokens_in=tokens_in, tokens_out=tokens_out)
+            return reply
+
+    def _invoke_inner(self, lc_msgs: list) -> dict:
+        result = self.agent.invoke({"messages": lc_msgs})
+        msgs_out = (result or {}).get("messages", []) if isinstance(result, dict) else []
+
+        # 마지막 AIMessage 추출 (BaseMessage 의 .type == "ai" 또는 클래스명 검사)
+        last_ai = None
+        for m in reversed(msgs_out):
+            if getattr(m, "type", None) == "ai" or type(m).__name__ == "AIMessage":
+                last_ai = m
+                break
+        if last_ai is None:
+            return {"role": "assistant", "content": ""}
+
+        # ask_user tool_call 인터셉트
+        tool_calls = list(getattr(last_ai, "tool_calls", None) or [])
+        for tc in tool_calls:
+            tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
+            if tc_name != self.ask_user_tool_name:
+                continue
+            tc_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
+            tc_args = tc_args or {}
+            tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+            self._pending_ask_tool_call = {
+                "id": tc_id, "name": self.ask_user_tool_name,
+            }
+            content_text = self._content_to_text(getattr(last_ai, "content", "")) \
+                or str(tc_args.get("question", ""))
+            return {
+                "role": "assistant",
+                "content": content_text,
+                "ask_user": {
+                    "type": tc_args.get("type", "input"),
+                    "question": tc_args.get("question", ""),
+                    "options": tc_args.get("options"),
+                },
+            }
+
+        # 일반 AIMessage
+        return {
+            "role": "assistant",
+            "content": self._content_to_text(getattr(last_ai, "content", "")),
+        }
+
+    @staticmethod
+    def _content_to_text(content: Any) -> str:
+        """AIMessage.content 가 str 또는 멀티-블록 list 일 수 있어 평문으로 정리."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "text":
+                    parts.append(str(b.get("text", "")))
+                elif isinstance(b, str):
+                    parts.append(b)
+            return "".join(parts)
+        return str(content) if content is not None else ""
+
+
+def make_ask_user_tool():
+    """`create_agent(tools=[..., make_ask_user_tool()])` 로 주입할 ask_user 툴.
+
+    에이전트가 사용자에게 되묻고 싶을 때 이 툴을 호출하면, _CompiledGraphLLMAdapter 가
+    실제 실행 없이 가로채 Chatbot 의 기존 pending_interrupt 플로우로 변환한다.
+    툴 함수 본문은 도달하지 않는 것이 정상이며, 어댑터 외부 경로로 잘못 호출됐을 때만
+    RuntimeError 로 명시적으로 알린다.
+
+    필요 패키지: `langchain_core>=0.3` (보통 langchain 설치 시 함께 들어옴).
+    """
+    from langchain_core.tools import tool
+
+    @tool
+    def ask_user(type: str, question: str,
+                 options: Optional[list] = None) -> str:
+        """사용자에게 직접 되물어 답을 받는다.
+
+        Args:
+            type: 'input' (주관식) | 'choice' (단일 선택) | 'multi_choice' (복수 선택)
+            question: 사용자에게 보여줄 질문 텍스트
+            options: choice / multi_choice 일 때 보여줄 선택지 리스트
+        """
+        raise RuntimeError(
+            "ask_user 툴은 _CompiledGraphLLMAdapter 가 가로채야 합니다 "
+            "(직접 실행되면 안 됨). Chatbot(llm=create_agent(...)) 형태로 사용하세요."
+        )
+
+    return ask_user
 
 
 # ===== 4. LangGraph 챗봇 그래프 =====
@@ -415,7 +592,16 @@ class Chatbot:
                  tracer: Optional[Tracer] = None,
                  thread_id: Optional[str] = None):
         self.tracer = tracer if tracer is not None else Tracer()
-        self.llm = llm if llm is not None else MockLLM(tracer=self.tracer)
+        # llm 인자 자동 감지:
+        #   - None              → MockLLM (기본)
+        #   - CompiledStateGraph(=create_agent 결과) → 내부 어댑터로 자동 래핑
+        #   - 그 외 dict 계약 어댑터 → 그대로 사용
+        if llm is None:
+            self.llm = MockLLM(tracer=self.tracer)
+        elif _looks_like_compiled_graph(llm):
+            self.llm = _CompiledGraphLLMAdapter(llm, tracer=self.tracer)
+        else:
+            self.llm = llm
         # 외부에서 주입한 LLM이 tracer를 들고 있지 않다면 붙여준다
         if getattr(self.llm, "tracer", None) is None:
             try:
@@ -633,9 +819,11 @@ class Chatbot:
             )
 
         def _build_normal_input():
-            input_box = W.Textarea(
-                placeholder="메시지를 입력하고 '보내기' 를 누르세요. (여러 줄 입력 가능)",
-                layout=W.Layout(width="100%", height="70px"),
+            # Textarea 대신 Text(단행) 위젯 사용 — Enter 로 송신, '보내기' 버튼은 fallback.
+            # 다중라인은 ipywidgets 만으로는 단축키 분기가 불가하므로 단행 입력으로 단순화.
+            input_box = W.Text(
+                placeholder="메시지를 입력하고 Enter 또는 '보내기' 를 누르세요.",
+                layout=W.Layout(width="100%"),
             )
             send_btn = W.Button(description="보내기", button_style="primary",
                                 icon="paper-plane")
@@ -658,6 +846,12 @@ class Chatbot:
                     _refresh_input()
 
             send_btn.on_click(_on_send)
+            # Text.on_submit 은 ipywidgets 8 에서 deprecated 이지만 여전히 동작 (DeprecationWarning).
+            # 미래에 제거되더라도 보내기 버튼이 fallback 으로 남는다.
+            try:
+                input_box.on_submit(_on_send)
+            except Exception:
+                pass
             return W.VBox([input_box, send_btn])
 
         def _build_interrupt_input(payload: dict):
@@ -751,10 +945,10 @@ class Chatbot:
                 submit_btn.on_click(_on_submit)
                 return W.VBox([banner, chooser, submit_btn])
 
-            # 주관식 (type == "input")
-            text_box = W.Textarea(
-                placeholder="답변을 입력하고 '답변 제출' 을 누르세요.",
-                layout=W.Layout(width="100%", height="60px"),
+            # 주관식 (type == "input") — Text(단행) 위젯, Enter 로 제출
+            text_box = W.Text(
+                placeholder="답변을 입력하고 Enter 또는 '답변 제출' 을 누르세요.",
+                layout=W.Layout(width="100%"),
             )
 
             def _on_submit(_btn=None):
@@ -775,6 +969,10 @@ class Chatbot:
                     _refresh_input()
 
             submit_btn.on_click(_on_submit)
+            try:
+                text_box.on_submit(_on_submit)
+            except Exception:
+                pass
             return W.VBox([banner, text_box, submit_btn])
 
         def _refresh_input():
