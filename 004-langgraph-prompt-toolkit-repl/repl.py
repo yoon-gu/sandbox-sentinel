@@ -356,7 +356,7 @@ class ReplApp:
             "input": "주관식",
         }.get(self.hitl_mode, "HITL")
         hints = {
-            "choice": "1-9 즉시 선택 · ↑↓ 이동 · Enter 선택 · Esc 취소",
+            "choice": "1-9 또는 ↑↓ 로 이동 · Enter 로 확정 · Esc 취소",
             "multi": "1-9 토글 · ↑↓ 이동 · Space 체크 · Enter 제출 · Esc 취소",
             "input": "Enter 제출 · Esc 취소",
         }.get(self.hitl_mode, "")
@@ -694,7 +694,7 @@ class ReplApp:
             "  입력창에 / 입력하면 명령 목록이 힌트로 노출. Tab 으로 첫 매치 자동완성.\n"
             "\n"
             "HITL 인터랙션 (입력창이 자동 전환)\n"
-            "  객관식   : 1-9 로 즉시 선택 · ↑↓ 이동 · Enter 선택 · Esc 취소\n"
+            "  객관식   : 1-9 또는 ↑↓ 로 이동 · Enter 로 확정 · Esc 취소\n"
             "  복수선택 : 1-9 로 토글 · ↑↓ 이동 · Space 체크 · Enter 제출 · Esc 취소\n"
             "  주관식   : 답변 입력 후 Enter · Esc 로 취소\n"
             "\n"
@@ -826,12 +826,11 @@ class ReplApp:
         def _(event):
             self._cancel_hitl()
 
-        # 숫자키 1-9 로 즉시 선택 + 제출 (Claude Code 스타일)
+        # 숫자키 1-9 로 해당 옵션으로 하이라이트 이동만 — 확정은 Enter
         def _make_choice_pick(idx: int):
             def _handler(event):
                 if 0 <= idx < len(self.hitl_options):
                     self.choice_cursor = idx
-                    self._submit_resume(self.hitl_options[idx])
             return _handler
 
         for _n in range(1, 10):

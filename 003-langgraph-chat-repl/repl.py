@@ -421,10 +421,9 @@ class _ChoiceList(OptionList):
         super().__init__(*numbered, id=id, **kwargs)
 
     def action_pick(self, idx: int) -> None:
+        """숫자키 N → N-1 번째로 하이라이트 이동만. 확정은 사용자가 Enter 로 직접."""
         if 0 <= idx < len(self._orig_options):
             self.highlighted = idx
-            # action_select 로 OptionSelected 이벤트 발생 → 기존 핸들러가 _submit_resume 호출
-            self.action_select()
 
     def orig_option(self, idx: int) -> str:
         """OptionSelected 이벤트의 option_index 로 원본 옵션 문자열 조회."""
@@ -678,7 +677,7 @@ class ChatApp(App[None]):
 
         label = {"choice": "객관식", "multi_choice": "복수선택"}.get(qtype, "주관식")
         hints = {
-            "choice": "1-9 즉시 선택 · ↑↓ 이동 · Enter 선택 · Esc 취소",
+            "choice": "1-9 또는 ↑↓ 로 이동 · Enter 로 확정 · Esc 취소",
             "multi_choice": "1-9 토글 · ↑↓ 이동 · Space 체크 · Enter 제출 · Esc 취소",
             "input": "Enter 제출 · Esc 취소",
         }[qtype]
@@ -848,7 +847,7 @@ class ChatApp(App[None]):
             "  [cyan]/help[/cyan]     이 도움말                                    — F1\n"
             "  [cyan]/quit[/cyan]     종료                                         — Ctrl+C\n\n"
             "[bold]HITL 인터랙션 (입력창이 자동 전환)[/bold]\n"
-            "  객관식   : [yellow]1-9[/yellow] 로 즉시 선택 · ↑↓ 이동 · Enter 선택 · Esc 취소\n"
+            "  객관식   : [yellow]1-9[/yellow] 또는 ↑↓ 로 이동 · [yellow]Enter[/yellow] 로 확정 · Esc 취소\n"
             "  복수선택 : [yellow]1-9[/yellow] 로 토글 · ↑↓ 이동 · [yellow]Space[/yellow] 체크 · Enter 제출\n"
             "  주관식   : 답변 입력 후 Enter · Esc 로 취소\n\n"
             "[bold]슬래시 팔레트[/bold]\n"
