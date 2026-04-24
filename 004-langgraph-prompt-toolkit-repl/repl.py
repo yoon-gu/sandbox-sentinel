@@ -356,8 +356,8 @@ class ReplApp:
             "input": "주관식",
         }.get(self.hitl_mode, "HITL")
         hints = {
-            "choice": "↑↓ 이동 · Enter 선택 · Esc 취소",
-            "multi": "↑↓ 이동 · Space 체크 · Enter 제출 · Esc 취소",
+            "choice": "1-9 즉시 선택 · ↑↓ 이동 · Enter 선택 · Esc 취소",
+            "multi": "1-9 토글 · ↑↓ 이동 · Space 체크 · Enter 제출 · Esc 취소",
             "input": "Enter 제출 · Esc 취소",
         }.get(self.hitl_mode, "")
         return FormattedText([
@@ -398,10 +398,11 @@ class ReplApp:
     def _render_choice(self) -> FormattedText:
         parts: list[tuple[str, str]] = []
         for i, opt in enumerate(self.hitl_options or ["(옵션 없음)"]):
+            num = f"{i + 1}." if i < 9 else "  "
             if i == self.choice_cursor:
-                parts.append(("class:list.cursor", f"  ▸ {opt}\n"))
+                parts.append(("class:list.cursor", f"  ▸ {num} {opt}\n"))
             else:
-                parts.append(("class:list.item", f"    {opt}\n"))
+                parts.append(("class:list.item", f"    {num} {opt}\n"))
         return FormattedText(parts)
 
     def _render_multi(self) -> FormattedText:
@@ -409,8 +410,9 @@ class ReplApp:
         for i, opt in enumerate(self.hitl_options or ["(옵션 없음)"]):
             check = "[x]" if (i < len(self.multi_selected) and self.multi_selected[i]) else "[ ]"
             marker = "▸" if i == self.multi_cursor else " "
+            num = f"{i + 1}." if i < 9 else "  "
             style = "class:list.cursor" if i == self.multi_cursor else "class:list.item"
-            parts.append((style, f"  {marker} {check} {opt}\n"))
+            parts.append((style, f"  {marker} {num} {check} {opt}\n"))
         return FormattedText(parts)
 
     # ---------- 히스토리 조작 ----------
@@ -692,8 +694,8 @@ class ReplApp:
             "  입력창에 / 입력하면 명령 목록이 힌트로 노출. Tab 으로 첫 매치 자동완성.\n"
             "\n"
             "HITL 인터랙션 (입력창이 자동 전환)\n"
-            "  객관식   : ↑↓ 로 이동 · Enter 로 선택 · Esc 로 취소\n"
-            "  복수선택 : ↑↓ 로 이동 · Space 로 토글 · Enter 로 제출 · Esc 로 취소\n"
+            "  객관식   : 1-9 로 즉시 선택 · ↑↓ 이동 · Enter 선택 · Esc 취소\n"
+            "  복수선택 : 1-9 로 토글 · ↑↓ 이동 · Space 체크 · Enter 제출 · Esc 취소\n"
             "  주관식   : 답변 입력 후 Enter · Esc 로 취소\n"
             "\n"
             "HITL 트리거 (MockLLM 기준)\n"
@@ -824,6 +826,17 @@ class ReplApp:
         def _(event):
             self._cancel_hitl()
 
+        # 숫자키 1-9 로 즉시 선택 + 제출 (Claude Code 스타일)
+        def _make_choice_pick(idx: int):
+            def _handler(event):
+                if 0 <= idx < len(self.hitl_options):
+                    self.choice_cursor = idx
+                    self._submit_resume(self.hitl_options[idx])
+            return _handler
+
+        for _n in range(1, 10):
+            choice_kb.add(str(_n))(_make_choice_pick(_n - 1))
+
         self.choice_ctrl = FormattedTextControl(
             text=self._render_choice,
             focusable=True,
@@ -868,6 +881,17 @@ class ReplApp:
         @multi_kb.add("escape")
         def _(event):
             self._cancel_hitl()
+
+        # 숫자키 1-9 로 해당 항목 토글 (Space 대체 단축)
+        def _make_multi_toggle(idx: int):
+            def _handler(event):
+                if 0 <= idx < len(self.multi_selected):
+                    self.multi_cursor = idx
+                    self.multi_selected[idx] = not self.multi_selected[idx]
+            return _handler
+
+        for _n in range(1, 10):
+            multi_kb.add(str(_n))(_make_multi_toggle(_n - 1))
 
         self.multi_ctrl = FormattedTextControl(
             text=self._render_multi,
