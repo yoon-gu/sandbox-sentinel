@@ -35,12 +35,15 @@
 | 필수 | `langgraph` | StateGraph, MemorySaver, START/END |
 | 선택 | `IPython` | 노트북 인라인 렌더 (`show_trace` / `show_history`). 미설치 시 `save_trace()` / `print` 로 대체 |
 | 선택 | `ipywidgets` | 셀 output 안에서 동작하는 인터랙티브 채팅 UI (`chat_ui`). 미설치 시 `chat()` + `show_history()` 조합으로 대체 |
+| 선택 | `langchain` (≥1.0) + `langchain_core` | `Chatbot(llm=create_agent(...))` 패턴을 쓸 때만 필요. `MockLLM`/`MyLocalLLM` 패턴만 쓸 때는 불필요 — 어댑터 import 가 lazy 라 미설치 환경에서도 `from chatbot import Chatbot` 가 깨지지 않음 |
 
 > `numpy`, `pandas`, `torch`, `transformers` 등은 **사용하지 않습니다**. 원하는 경우 실제 LLM 어댑터에서만 추가로 사용하세요.
 
 ## 사용 예시
 
 가장 빠른 길은 `examples/demo.ipynb` 를 JupyterLab 에서 여는 것입니다. 노트북 최상단의 **0. 인터랙티브 채팅 UI** 셀 하나만 실행해도 셀 output 안에서 멀티턴 대화 + 트레이스 조회가 바로 가능합니다.
+
+> ⌨️ **단축키**: 채팅 입력칸은 단행 `Text` 위젯이라 **Enter 만 누르면 전송**됩니다. (보내기/답변 제출 버튼도 그대로 작동) 다중라인 입력은 ipywidgets 만으로는 단축키 분기가 안 되어 의도적으로 비활성화 — 긴 텍스트는 단행으로 압축하거나 paste 후 송신.
 
 ```bash
 cd 001-langgraph-notebook-chatbot
@@ -133,6 +136,31 @@ bot = Chatbot(llm=MyLocalLLM())
 ```
 
 어댑터 내부에서 `self.tracer.span("LLM:xxx", kind="llm", inputs=messages)` 블록으로 감싸주면 트레이스 뷰어에 토큰/latency가 함께 표시됩니다 (`MockLLM` 구현을 그대로 참고하세요).
+
+### LangChain `create_agent` 로 교체하기
+
+`langchain>=1.0` 의 `create_agent(...)` 결과물(LangGraph `CompiledStateGraph`)은 **그대로** `Chatbot(llm=...)` 에 넘기면 됩니다 — 별도 래퍼 import 불필요. `Chatbot.__init__` 이 객체 모양을 감지해 내부 어댑터 (`_CompiledGraphLLMAdapter`) 로 자동 래핑합니다.
+
+```python
+from langchain.agents import create_agent
+from chatbot import Chatbot, make_ask_user_tool   # make_ask_user_tool 은 HITL 쓸 때만
+
+agent = create_agent(
+    model="openai:gpt-4o-mini",                 # 사내망에서는 사내 LLM endpoint 로 교체
+    tools=[my_tool, make_ask_user_tool()],       # ask_user 툴은 HITL 용
+    prompt="필요하면 ask_user 툴로 사용자에게 되물어 답을 받으세요.",
+)
+
+bot = Chatbot(llm=agent)        # CompiledStateGraph 자동 감지 → 내부 어댑터로 래핑
+bot.chat_ui()
+```
+
+동작 요약:
+
+- 내부 `create_agent` 는 **checkpointer 없이 stateless** 로 호출. 멀티턴 메모리는 외부 `Chatbot` 의 `MemorySaver` 가 담당하므로 `thread_id` 동기화 이슈 없음.
+- HITL 은 에이전트가 `ask_user` 툴을 호출하면 어댑터가 **실제 실행하지 않고** 가로채 기존 `pending_interrupt` 페이로드로 변환합니다. `bot.resume(answer)` 시 답변은 `ToolMessage` 로 에이전트에 되돌려져 그래프가 이어집니다.
+- 입력/출력 메시지 타입(`list[dict]` ↔ `BaseMessage`) 변환은 어댑터가 `langchain_core.messages.convert_to_messages` 로 처리합니다.
+- 자체 어댑터 클래스에 우연히 `get_graph` / `stream` / `invoke` 메서드가 모두 있어 자동 감지에 걸리는 경우, 클래스에 `_dict_invoke_contract = True` 속성을 두면 자동 감지를 우회합니다 (`MockLLM` 도 이 표식을 사용).
 
 ## 트레이스 뷰어 화면 구성
 
