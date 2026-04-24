@@ -402,6 +402,8 @@ class _ChoiceList(OptionList):
 
     기본 OptionList 의 ↑↓ · Enter 동작은 그대로. 숫자키는 해당 옵션으로 하이라이트
     를 이동시킨 뒤 선택 액션을 발생시켜 OptionList.OptionSelected 이벤트가 발화한다.
+    또한 옵션 1-9 앞에 "1." ~ "9." 번호 prefix 를 붙여 화면에 표시하고, 선택 시에는
+    원본 옵션 문자열로 되돌려 resume 에 전달한다 (orig_option).
     """
 
     BINDINGS = [
@@ -409,15 +411,26 @@ class _ChoiceList(OptionList):
           for n in range(1, 10)],
     ]
 
+    def __init__(self, *prompts: Any, id: Optional[str] = None, **kwargs: Any) -> None:
+        # 원본 옵션을 보관 → OptionSelected 핸들러에서 번호를 벗긴 원본으로 복원
+        self._orig_options: list[str] = [str(p) for p in prompts]
+        numbered = [
+            f"{i + 1}. {p}" if i < 9 else str(p)
+            for i, p in enumerate(self._orig_options)
+        ]
+        super().__init__(*numbered, id=id, **kwargs)
+
     def action_pick(self, idx: int) -> None:
-        try:
-            count = self.option_count
-        except Exception:
-            count = 0
-        if 0 <= idx < count:
+        if 0 <= idx < len(self._orig_options):
             self.highlighted = idx
             # action_select 로 OptionSelected 이벤트 발생 → 기존 핸들러가 _submit_resume 호출
             self.action_select()
+
+    def orig_option(self, idx: int) -> str:
+        """OptionSelected 이벤트의 option_index 로 원본 옵션 문자열 조회."""
+        if 0 <= idx < len(self._orig_options):
+            return self._orig_options[idx]
+        return ""
 
 
 class _ToolDetailsScreen(ModalScreen[None]):
@@ -764,11 +777,16 @@ class ChatApp(App[None]):
         self.query_one("#slash-hint", Static).add_class("hidden")
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        """객관식 — Enter 로 옵션 선택."""
+        """객관식 — Enter 또는 숫자키로 옵션 선택."""
         if event.option_list.id != "hitl-choice":
             return
-        # event.option 은 Option 인스턴스. prompt 가 표시 문자열.
-        answer = str(event.option.prompt)
+        widget = event.option_list
+        # _ChoiceList 는 "1. <옵션>" 형태로 번호 prefix 를 붙여 표시하므로
+        # option_index 로 원본 옵션 문자열을 되찾아 resume 에 전달
+        if isinstance(widget, _ChoiceList):
+            answer = widget.orig_option(event.option_index)
+        else:
+            answer = str(event.option.prompt)
         self._submit_resume(answer)
 
     def on__inline_multi_choice_submitted(self, event: "_InlineMultiChoice.Submitted") -> None:
