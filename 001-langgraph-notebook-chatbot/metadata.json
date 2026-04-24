@@ -11,18 +11,28 @@
   "converted_at": "2026-04-17",
   "agent_version": "0.1.0",
   "dependencies_used": ["langgraph"],
+  "optional_dependencies": {
+    "langchain": ">=1.0  # Chatbot(llm=create_agent(...)) 패턴을 쓸 때만",
+    "langchain_core": ">=0.3  # convert_to_messages, ToolMessage, @tool — langchain 설치 시 함께 들어옴",
+    "ipywidgets": ">=7  # chat_ui() 인터랙티브 UI"
+  },
   "extracted_features": [
     "LangGraph StateGraph 기반 멀티턴 챗봇 (MemorySaver 체크포인터 + thread_id)",
     "LangSmith 스타일 observability 트레이서 (노드/LLM/tool span, 토큰, latency)",
     "self-contained HTML trace 뷰어 (외부 리소스/JS fetch 없음)",
     "Jupyter 노트북에서 IPython.display로 인라인 렌더 + 외부 파일 저장 모두 지원",
     "외부 네트워크/transformers 의존 없는 MockLLM (워크플로 시연용)",
-    "Human-in-the-loop: LLM 이 ask_user 를 반환하면 langgraph.types.interrupt() 로 일시정지하고, chat_ui 가 주관식(Textarea)/객관식(RadioButtons)/복수선택(Checkbox 그룹) UI 로 자동 전환 — resume(answer) 로 그래프 재개"
+    "Human-in-the-loop: LLM 이 ask_user 를 반환하면 langgraph.types.interrupt() 로 일시정지하고, chat_ui 가 주관식(Text)/객관식(RadioButtons)/복수선택(Checkbox 그룹) UI 로 자동 전환 — resume(answer) 로 그래프 재개",
+    "LLM 인터페이스 통합: Chatbot(llm=...) 가 (a) MockLLM/MyLocalLLM 처럼 dict 계약 어댑터, (b) langchain.agents.create_agent 결과(LangGraph CompiledStateGraph) 모두 자동 감지 후 동일하게 동작. create_agent 모드에서 ask_user 툴 호출은 어댑터가 가로채 기존 pending_interrupt 플로우로 변환.",
+    "chat_ui 입력 단축키: 단행 Text 위젯 + on_submit 으로 Enter 송신 지원."
   ],
   "limitations": [
     "MockLLM은 실제 언어모델이 아닌 에코-스타일 시뮬레이터입니다. 사내 실제 LLM 어댑터로 교체해야 의미 있는 응답이 나옵니다.",
     "토큰 수는 공백 기준 단어 수 근사입니다. 실제 토크나이저 기반 수치가 필요하면 교체하세요.",
     "트레이서는 in-memory 저장만 지원합니다. 영속화는 HTML 파일 export 형태로만 제공됩니다 (CLAUDE.md 정책).",
-    "LangSmith의 웹 기반 비교/팀 공유 기능은 제공하지 않습니다. 스냅샷 단위 HTML 뷰어만 제공합니다."
+    "LangSmith의 웹 기반 비교/팀 공유 기능은 제공하지 않습니다. 스냅샷 단위 HTML 뷰어만 제공합니다.",
+    "Chatbot(llm=create_agent(...)) 패턴은 langchain>=1.0 이 필요합니다. 폐쇄망 허용 스택에 미포함이면 MyLocalLLM 패턴(dict invoke 계약)을 사용하세요.",
+    "create_agent 어댑터는 내부 에이전트를 stateless 로 호출합니다 (외부 Chatbot 의 MemorySaver 가 메모리 담당). 내부 에이전트 자체의 thread state(structured_response 등) 는 활용되지 않습니다.",
+    "chat_ui 입력은 단행 Text 위젯이라 다중라인 입력은 지원하지 않습니다. ipywidgets 만으로는 Textarea + 단축키 분기가 불가하기 때문입니다 (ipyevents 도입은 폐쇄망 패키지 정책에 따라 후속 검토)."
   ]
 }
