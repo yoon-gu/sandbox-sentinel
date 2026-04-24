@@ -12,7 +12,7 @@
 | Tool 상세 | 전용 `ModalScreen` 으로 팝업 | 히스토리에 펼쳐서 직접 작성 (일관된 UX) |
 | 사내 미러 적합성 | textual 등록 여부 확인 필요 | prompt_toolkit 은 ipython 있으면 함께 옴 |
 
-**UX 는 동일** — 인라인 HITL (팝업 없음), 슬래시 팔레트, Tab 자동완성, trace 저장, macOS 친화 키(Enter / Esc / ↑↓ / Space / Tab).
+**UX 는 동일** — 인라인 HITL (팝업 없음), 슬래시 팔레트, Tab 자동완성, trace 저장, macOS 친화 키(Enter / Esc / ↑↓ / Space / Tab / **1-9 즉시 선택·토글**).
 
 ## 원본 출처
 
@@ -75,7 +75,7 @@ cd 004-langgraph-prompt-toolkit-repl
 
 - `안녕` — 일반 대화
 - `12 + 7 + 100 계산해줘` — tool span (calculator) 가 트레이스에 기록됨
-- `포트폴리오 추천해줘` — 객관식 HITL 로 입력창 전환 (↑↓ · Enter)
+- `포트폴리오 추천해줘` — 객관식 HITL 로 입력창 전환 (**`1-9`** 즉시 선택 · 또는 `↑↓ · Enter`)
 - `관심 자산군 여러 개 알려줘` — 복수선택 HITL 로 전환 (Space · Enter)
 - `상황을 구체적으로 설명해줘` — 주관식 HITL 로 전환 (타이핑 · Enter)
 - `/` — 슬래시 팔레트 힌트 노출

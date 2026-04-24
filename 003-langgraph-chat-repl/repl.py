@@ -335,6 +335,9 @@ class _InlineMultiChoice(Widget):
         Binding("space", "toggle", "체크", show=False),
         Binding("enter", "submit", "제출", show=False, priority=True),
         Binding("escape", "cancel", "취소", show=False, priority=True),
+        # 숫자키 1-9 로 해당 항목 토글 (Space 보다 빠른 단축)
+        *[Binding(str(n), f"toggle_idx({n - 1})", str(n), show=False)
+          for n in range(1, 10)],
     ]
 
     class Submitted(Message):
@@ -358,7 +361,11 @@ class _InlineMultiChoice(Widget):
             marker = "▸" if i == self.focused_idx else " "
             check = "[x]" if self.selected_flags[i] else "[ ]"
             style = "bold cyan" if i == self.focused_idx else ""
-            text.append(f"{marker} {check} {opt}\n", style=style)
+            # 숫자 프리픽스 (1-9 범위만 표시 · 10+ 는 화살표로 이동)
+            num_prefix = f"{i + 1}." if i < 9 else "  "
+            text.append(
+                f"{marker} {num_prefix} {check} {opt}\n", style=style,
+            )
         return text
 
     def action_cursor_up(self) -> None:
@@ -375,12 +382,42 @@ class _InlineMultiChoice(Widget):
         self.selected_flags[self.focused_idx] = not self.selected_flags[self.focused_idx]
         self.refresh()
 
+    def action_toggle_idx(self, idx: int) -> None:
+        """숫자키 N → (N-1) 번째 항목 토글 + 포커스 이동."""
+        if 0 <= idx < len(self.options):
+            self.focused_idx = idx
+            self.selected_flags[idx] = not self.selected_flags[idx]
+            self.refresh()
+
     def action_submit(self) -> None:
         selected = [self.options[i] for i, flag in enumerate(self.selected_flags) if flag]
         self.post_message(self.Submitted(selected))
 
     def action_cancel(self) -> None:
         self.post_message(self.Cancelled())
+
+
+class _ChoiceList(OptionList):
+    """숫자 키 1-9 로 해당 항목을 즉시 선택/제출하는 OptionList 확장.
+
+    기본 OptionList 의 ↑↓ · Enter 동작은 그대로. 숫자키는 해당 옵션으로 하이라이트
+    를 이동시킨 뒤 선택 액션을 발생시켜 OptionList.OptionSelected 이벤트가 발화한다.
+    """
+
+    BINDINGS = [
+        *[Binding(str(n), f"pick({n - 1})", str(n), show=False)
+          for n in range(1, 10)],
+    ]
+
+    def action_pick(self, idx: int) -> None:
+        try:
+            count = self.option_count
+        except Exception:
+            count = 0
+        if 0 <= idx < count:
+            self.highlighted = idx
+            # action_select 로 OptionSelected 이벤트 발생 → 기존 핸들러가 _submit_resume 호출
+            self.action_select()
 
 
 class _ToolDetailsScreen(ModalScreen[None]):
@@ -628,8 +665,8 @@ class ChatApp(App[None]):
 
         label = {"choice": "객관식", "multi_choice": "복수선택"}.get(qtype, "주관식")
         hints = {
-            "choice": "↑↓ 이동 · Enter 선택 · Esc 취소",
-            "multi_choice": "↑↓ 이동 · Space 체크 · Enter 제출 · Esc 취소",
+            "choice": "1-9 즉시 선택 · ↑↓ 이동 · Enter 선택 · Esc 취소",
+            "multi_choice": "1-9 토글 · ↑↓ 이동 · Space 체크 · Enter 제출 · Esc 취소",
             "input": "Enter 제출 · Esc 취소",
         }[qtype]
         banner = self.query_one("#hitl-banner", Static)
@@ -647,7 +684,7 @@ class ChatApp(App[None]):
         if qtype == "choice":
             self._hitl_mode = "choice"
             opts = options or ["(옵션 없음)"]
-            widget = OptionList(*opts, id="hitl-choice")
+            widget = _ChoiceList(*opts, id="hitl-choice")
             wrap.mount(widget)
             widget.focus()
         elif qtype == "multi_choice":
@@ -793,8 +830,8 @@ class ChatApp(App[None]):
             "  [cyan]/help[/cyan]     이 도움말                                    — F1\n"
             "  [cyan]/quit[/cyan]     종료                                         — Ctrl+C\n\n"
             "[bold]HITL 인터랙션 (입력창이 자동 전환)[/bold]\n"
-            "  객관식   : ↑↓ 로 이동 · [yellow]Enter[/yellow] 로 선택 · Esc 로 취소\n"
-            "  복수선택 : ↑↓ 로 이동 · [yellow]Space[/yellow] 로 체크 토글 · Enter 로 제출\n"
+            "  객관식   : [yellow]1-9[/yellow] 로 즉시 선택 · ↑↓ 이동 · Enter 선택 · Esc 취소\n"
+            "  복수선택 : [yellow]1-9[/yellow] 로 토글 · ↑↓ 이동 · [yellow]Space[/yellow] 체크 · Enter 제출\n"
             "  주관식   : 답변 입력 후 Enter · Esc 로 취소\n\n"
             "[bold]슬래시 팔레트[/bold]\n"
             "  입력창에 [cyan]/[/cyan] 입력하면 명령 목록 힌트가 바로 위에 노출됨\n"
