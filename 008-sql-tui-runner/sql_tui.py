@@ -482,26 +482,13 @@ def _build_app(*, on_execute, tables, notes, initial_query):
                 self._insert_at_cursor(snippet)
             self.query_one("#editor", _SqlTextArea).focus()
 
-        # ── 트리 노드 선택 → 에디터 인서트 ──
-        # 테이블 노드: 'SELECT * FROM <table>;' 로 에디터 전체 교체 (빠른 시작)
-        # 컬럼 노드 : 컬럼명을 현재 커서 위치에 인서트 (기존 동작)
+        # ── 트리 노드 선택 → 에디터 커서 위치에 이름 인서트 ──
+        # 테이블 / 컬럼 구분 없이 이름만 단순 인서트.
         def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
             data = event.node.data
             if not data:
                 return
-            editor = self.query_one("#editor", _SqlTextArea)
-            if data.get("kind") == "table":
-                tname = data["name"]
-                new_text = f"SELECT * FROM {tname};"
-                editor.text = new_text
-                # 커서를 끝으로
-                try:
-                    editor.cursor_location = (0, len(new_text))
-                except Exception:
-                    pass
-            else:
-                self._insert_at_cursor(data["name"])
-            editor.focus()
+            self._insert_at_cursor(data["name"])
 
         def _insert_at_cursor(self, snippet: str) -> None:
             editor = self.query_one("#editor", TextArea)
