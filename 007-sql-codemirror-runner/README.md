@@ -118,6 +118,29 @@ def on_execute(sql: str) -> Any:
 
 콜백 미등록 시 ▶ 실행 클릭 → 안내 메시지 + SQL 출력만 표시 (시연용).
 
+### 후속 분석 — `runner.last_result` / `runner.history`
+
+▶ 실행 후 `runner` 객체에 결과가 보관되어 다음 셀에서 곧장 후속 분석 가능:
+
+```python
+runner.show()      # 사용자가 ▶ 실행을 누름
+# (다음 셀)
+df = runner.last_result            # 마지막 실행 결과 (DataFrame 등)
+print(df.describe())
+df.to_parquet("/tmp/result.parquet")
+
+runner.last_query                  # 마지막으로 실행한 SQL 문자열
+runner.last_error                  # 실패했다면 Exception, 성공이면 None
+runner.query                       # ↘ 현재 에디터 안의 SQL (실행 안 했어도 OK)
+runner.result                      # last_result 의 짧은 alias
+
+runner.history                     # [{query, result, error}, ...] 모든 실행 기록
+runner.history[-1]["result"]       # 마지막 실행
+runner.history[0]["query"]         # 첫 실행
+```
+
+> 위젯이 떠 있는 동안 ▶ 실행을 여러 번 눌러도 매번 `history` 에 누적 기록되므로 시도해본 쿼리들을 한 번에 비교/탐색할 수 있습니다.
+
 ### 직접 등록
 
 ```python
