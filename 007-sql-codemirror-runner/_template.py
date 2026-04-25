@@ -82,6 +82,133 @@ _FUNCTIONS = [
 ]
 
 
+# ===== 컨텍스트 감지 + 추천 (Python 사이드 — 005/006 동일 골격) =====
+# CM 안의 popup 자동완성은 JS 사이드에서 contextHint() 가 처리.
+# 여기 Python 함수들은 에디터 아래에 늘 띄워두는 칩 패널 (=005 의 추천
+# 영역) 을 ipywidgets.Button 으로 그릴 때 사용한다. cursor 위치를 모르므로
+# 005 와 달리 "텍스트 끝" 을 기준으로 동작 (006 와 동일 한계).
+
+_ANCHORS = {
+    "SELECT", "FROM", "WHERE", "JOIN", "ON", "AND", "OR",
+    "GROUP", "ORDER", "HAVING", "LIMIT", "BY",
+    "INSERT", "UPDATE", "DELETE", "SET", "INTO", "VALUES",
+    "INNER", "LEFT", "RIGHT", "FULL",
+    "UNION", "EXCEPT", "INTERSECT",
+    "AS", "WITH",
+}
+
+
+def detect_context(text: str) -> str:
+    """직전 anchor 키워드로 추천 종류를 결정 (005 와 동일 정책)."""
+    s = re.sub(r"--[^\n]*", " ", text)
+    s = re.sub(r"/\*.*?\*/", " ", s, flags=re.DOTALL)
+    s = re.sub(r"'[^']*'", " ", s)
+    s = re.sub(r'"[^"]*"', " ", s)
+    tokens = s.split()
+    if not tokens:
+        return "start"
+    last = None
+    last_idx = -1
+    for i in range(len(tokens) - 1, -1, -1):
+        tu = tokens[i].upper()
+        if tu in _ANCHORS:
+            last = tu
+            last_idx = i
+            break
+    if last is None:
+        return "start"
+    if last in ("GROUP", "ORDER") and last_idx + 1 < len(tokens):
+        if tokens[last_idx + 1].upper() == "BY":
+            last = last + "_BY"
+    if last == "BY" and last_idx > 0:
+        prev = tokens[last_idx - 1].upper()
+        if prev in ("GROUP", "ORDER"):
+            last = prev + "_BY"
+    MAP = {
+        "SELECT": "columns_or_star",
+        "FROM": "tables", "JOIN": "tables", "INTO": "tables", "UPDATE": "tables",
+        "INNER": "join_continue", "LEFT": "join_continue",
+        "RIGHT": "join_continue", "FULL": "join_continue",
+        "ON": "columns", "WHERE": "columns", "AND": "columns", "OR": "columns",
+        "GROUP_BY": "columns", "ORDER_BY": "columns", "HAVING": "columns",
+        "SET": "columns",
+        "LIMIT": "number",
+        "DELETE": "from_keyword",
+        "VALUES": "any", "AS": "any", "WITH": "any",
+    }
+    return MAP.get(last, "general")
+
+
+def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
+    """현재 컨텍스트에 맞는 추천 후보 리스트 (텍스트 끝 기준)."""
+    ctx = detect_context(text)
+    m = re.search(r"([\w_.]+)$", text)
+    last_word = m.group(1) if m else ""
+    last_lower = last_word.lower()
+
+    # table. qualifier 우선
+    if "." in last_word:
+        dot_idx = last_word.index(".")
+        tname = last_word[:dot_idx]
+        col_prefix = last_word[dot_idx + 1:].lower()
+        if tname in tables:
+            return [
+                {
+                    "value": f"{tname}.{c['name']}",
+                    "label": c["name"],
+                    "kind": "column",
+                    "meta": c.get("type", "") or tname,
+                }
+                for c in tables[tname]
+                if c["name"].lower().startswith(col_prefix)
+            ][:30]
+
+    cands: list = []
+    if ctx in ("tables", "general", "start"):
+        for tname in tables.keys():
+            cands.append({"value": tname, "label": tname,
+                          "kind": "table", "meta": "table"})
+    if ctx in ("columns", "columns_or_star", "general", "start"):
+        seen: set = set()
+        for tname, cols in tables.items():
+            for c in cols:
+                if c["name"] in seen:
+                    continue
+                seen.add(c["name"])
+                meta = (c.get("type", "") + " · " if c.get("type") else "") + tname
+                cands.append({"value": c["name"], "label": c["name"],
+                              "kind": "column", "meta": meta})
+    if ctx == "columns_or_star":
+        cands.insert(0, {"value": "*", "label": "*",
+                         "kind": "star", "meta": "all"})
+    if ctx == "join_continue":
+        cands.append({"value": "JOIN", "label": "JOIN",
+                      "kind": "keyword", "meta": "join"})
+        cands.append({"value": "OUTER JOIN", "label": "OUTER JOIN",
+                      "kind": "keyword", "meta": "join"})
+    if ctx == "from_keyword":
+        cands.append({"value": "FROM", "label": "FROM",
+                      "kind": "keyword", "meta": "kw"})
+
+    # 항상 KEYWORDS / FUNCTIONS fallback (JS 사이드와 정책 일치)
+    seen_v = {c["value"] for c in cands}
+    for kw in _KEYWORDS:
+        if kw not in seen_v:
+            cands.append({"value": kw, "label": kw,
+                          "kind": "keyword", "meta": "kw"})
+            seen_v.add(kw)
+    for fn in _FUNCTIONS:
+        v = fn + "("
+        if v not in seen_v:
+            cands.append({"value": v, "label": v,
+                          "kind": "function", "meta": "fn"})
+            seen_v.add(v)
+
+    if last_lower:
+        cands = [c for c in cands if last_lower in c["label"].lower()]
+    return cands[:30]
+
+
 # ===== 컬럼 스펙 정규화 =====
 
 def _normalize_column(c: ColumnSpec) -> dict:
@@ -325,19 +452,24 @@ _BOOTSTRAP_JS_TPL = r"""
     if(ctx === "from_keyword"){{
       cands.push({{ text: "FROM", displayText: "FROM  · keyword" }});
     }}
-    if(ctx === "general" || ctx === "start"){{
-      KEYWORDS.forEach(function(k){{
+    // 항상 KEYWORDS / FUNCTIONS 를 fallback 으로 추가 — substring 매칭으로
+    // 컨텍스트 외에도 'WHE', 'GR', 'JOI' 같은 부분 입력에 키워드/함수가
+    // 자동완성 popup 에 떠야 함. 컨텍스트 specific 후보가 위에 와서 우선.
+    var seenText = {{}};
+    cands.forEach(function(c){{ seenText[c.text] = 1; }});
+    KEYWORDS.forEach(function(k){{
+      if(!seenText[k]){{
         cands.push({{ text: k, displayText: k + "  · keyword" }});
-      }});
-      FUNCTIONS.forEach(function(f){{
-        cands.push({{ text: f + "(", displayText: f + "(  · function" }});
-      }});
-    }}
-    if(ctx === "columns" || ctx === "columns_or_star"){{
-      FUNCTIONS.forEach(function(f){{
-        cands.push({{ text: f + "(", displayText: f + "(  · function" }});
-      }});
-    }}
+        seenText[k] = 1;
+      }}
+    }});
+    FUNCTIONS.forEach(function(f){{
+      var t = f + "(";
+      if(!seenText[t]){{
+        cands.push({{ text: t, displayText: f + "(  · function" }});
+        seenText[t] = 1;
+      }}
+    }});
 
     var fl = word.toLowerCase();
     if(fl){{
@@ -376,6 +508,7 @@ class SQLRunnerCM:
         self._textarea = None
         self._run_box = None
         self._output = None
+        self._suggest_box = None
         self._uid = "u" + uuid.uuid4().hex[:10]
 
     # ----- 편의 생성자 (006 의 with_sqlite 와 동일 패턴) -----
@@ -567,11 +700,26 @@ class SQLRunnerCM:
             layout=W.Layout(padding="4px 0"),
         )
 
+        # ── 추천 칩 패널 (005 와 동일 컨셉) ──
+        # CM popup 자동완성과 별개로 항상 보이는 컨텍스트 추천. cursor 위치를
+        # 알 수 없어 텍스트 끝 기준으로 동작 — 정밀도가 popup 보다 낮은
+        # 대신 사용자가 "지금 뭘 칠 수 있는지" 한눈에 보이는 장점이 있음.
+        self._suggest_box = W.HBox(
+            layout=W.Layout(flex_flow="row wrap", padding="2px 0",
+                            min_height="32px"),
+        )
+
+        # ── 결과 Output — 모든 컬럼/행이 잘리지 않도록 충분히 넓고 높게 ──
         self._output = W.Output(
             layout=W.Layout(border="1px solid #d8dde1",
-                            max_height="420px", overflow="auto",
-                            padding="4px"),
+                            min_height="120px", max_height="720px",
+                            overflow="auto", padding="6px",
+                            width="100%"),
         )
+
+        # ── 텍스트 변경 → 추천 칩 갱신 ──
+        self._textarea.observe(self._on_text_change, names="value")
+        self._update_suggest(self.initial_query)
 
         # ── 우측 패널 조립 ──
         right = W.VBox([
@@ -584,6 +732,14 @@ class SQLRunnerCM:
             ),
             editor_html,
             self._textarea,                # display:none 처리됨 (JS)
+            W.HTML(
+                '<div style="padding:3px 10px;background:#f7f8fa;'
+                'border:1px solid #d8dde1;border-top:0;border-bottom:0;'
+                'font-size:11px;color:#6c757d">'
+                '💡 추천 (현재 컨텍스트 기반 · 클릭하면 커서 위치에 삽입)'
+                '</div>'
+            ),
+            self._suggest_box,
             actions,
             W.HTML(
                 '<div style="padding:3px 10px;background:#f7f8fa;'
@@ -663,6 +819,65 @@ class SQLRunnerCM:
                 self._output.clear_output()
         return _handler
 
+    def _on_text_change(self, change: Mapping[str, Any]) -> None:
+        new_text = change.get("new", "")
+        self._update_suggest(new_text)
+
+    def _update_suggest(self, text: str) -> None:
+        """추천 칩 패널 갱신. 컨텍스트 라벨 + 클릭 가능 Button 칩 렌더."""
+        import ipywidgets as W
+        ctx = detect_context(text)
+        ctx_label = {
+            "start": "시작",
+            "tables": "테이블",
+            "columns": "컬럼",
+            "columns_or_star": "컬럼 / *",
+            "join_continue": "JOIN 계속",
+            "from_keyword": "FROM",
+            "number": "숫자",
+            "any": "임의",
+            "general": "범용",
+        }.get(ctx, ctx)
+
+        children: list = [
+            W.HTML(
+                f'<span style="display:inline-block;padding:3px 9px;'
+                f'margin:2px 6px 2px 0;background:#fff;'
+                f'border:1px solid #c8ccd0;border-radius:11px;'
+                f'font-size:11px;color:#1f2329"><b>컨텍스트:</b> '
+                f'{escape(ctx_label)}</span>'
+            ),
+        ]
+
+        sugs = get_suggestions(text, self.tables)
+        if not sugs:
+            children.append(W.HTML(
+                '<span style="color:#888;font-size:11px;font-style:italic;'
+                'padding:4px">(추천 없음)</span>'
+            ))
+        else:
+            kind_color = {
+                "table": "#047857",
+                "column": "#b45309",
+                "keyword": "#2563eb",
+                "function": "#7c3aed",
+                "star": "#000000",
+            }
+            for s in sugs[:18]:
+                color = kind_color.get(s["kind"], "#1f2329")
+                btn = W.Button(
+                    description=s["label"],
+                    tooltip=s.get("meta", "") or s["kind"],
+                    layout=W.Layout(margin="2px", width="auto", height="22px"),
+                )
+                btn.style.button_color = "#ffffff"
+                btn.style.text_color = color
+                btn.on_click(self._make_inserter(s["value"]))
+                children.append(btn)
+
+        if self._suggest_box is not None:
+            self._suggest_box.children = children
+
     def _on_run(self, _btn: Any) -> None:
         from IPython.display import display
         sql = self._textarea.value if self._textarea is not None else ""
@@ -679,14 +894,56 @@ class SQLRunnerCM:
                 return
             try:
                 result = self.on_execute(sql)
-                if result is not None:
-                    display(result)
-                else:
-                    print("✓ 실행 완료 (반환값 없음)")
             except Exception as e:
                 import traceback
                 print(f"❌ {type(e).__name__}: {e}")
                 traceback.print_exc()
+                return
+            self._render_result(result)
+
+    def _render_result(self, result: Any) -> None:
+        """반환값을 Output 위젯에 적절히 렌더.
+
+        DataFrame 인 경우 모든 컬럼/충분한 행을 잘리지 않게 보이도록 pandas
+        옵션을 임시 변경하고, HTML 표 + 행/열 카운트 메시지를 함께 출력.
+        """
+        from IPython.display import display
+        if result is None:
+            print("✓ 실행 완료 (반환값 없음)")
+            return
+        try:
+            import pandas as pd
+            if isinstance(result, pd.DataFrame):
+                with pd.option_context(
+                    "display.max_columns", None,
+                    "display.width", None,
+                    "display.max_colwidth", 200,
+                    "display.max_rows", 500,
+                    "display.expand_frame_repr", False,
+                ):
+                    display(result)
+                print(f"\n[{len(result)} rows × {len(result.columns)} columns]")
+                return
+            # list[dict] / list[tuple] / dict 등도 보기 좋게 시도
+            if isinstance(result, list) and result and isinstance(result[0], dict):
+                try:
+                    df = pd.DataFrame(result)
+                    with pd.option_context(
+                        "display.max_columns", None,
+                        "display.width", None,
+                        "display.max_colwidth", 200,
+                        "display.max_rows", 500,
+                        "display.expand_frame_repr", False,
+                    ):
+                        display(df)
+                    print(f"\n[{len(df)} rows × {len(df.columns)} columns]  "
+                          f"(list[dict] → DataFrame 으로 자동 변환)")
+                    return
+                except Exception:
+                    pass
+        except ImportError:
+            pass
+        display(result)
 
     def _on_copy(self, _btn: Any) -> None:
         from IPython.display import display, HTML
