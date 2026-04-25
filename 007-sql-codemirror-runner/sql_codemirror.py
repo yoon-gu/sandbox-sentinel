@@ -980,12 +980,29 @@ class SQLRunnerCM:
         self.initial_query: str = ""
         self.on_execute = on_execute
 
+        # ── 후속 분석을 위한 실행 상태 ──
+        # ▶ 실행 후 다음 셀에서 runner.last_result.head() 같이 접근 가능.
+        self.last_query: Optional[str] = None      # 마지막으로 실행한 SQL
+        self.last_result: Any = None               # 마지막 실행의 반환값
+        self.last_error: Optional[BaseException] = None  # 실패했다면 예외
+        self.history: list[dict] = []              # [{query, result, error}]
+
         self._textarea = None
         self._cursor_text = None    # CM cursor 위치까지의 텍스트 (cursorActivity 동기화용)
         self._run_box = None
         self._output = None
         self._suggest_box = None
         self._uid = "u" + uuid.uuid4().hex[:10]
+
+    @property
+    def query(self) -> str:
+        """현재 에디터에 작성된 SQL (▶ 실행 안 했어도 읽기 가능)."""
+        return self._textarea.value if self._textarea is not None else self.initial_query
+
+    @property
+    def result(self) -> Any:
+        """last_result 의 짧은 alias — runner.result 로 바로 접근."""
+        return self.last_result
 
     # ----- 편의 생성자 (006 의 with_sqlite 와 동일 패턴) -----
 
@@ -1208,10 +1225,13 @@ class SQLRunnerCM:
                             min_height="32px"),
         )
 
-        # ── 결과 Output — 모든 컬럼/행이 잘리지 않도록 충분히 넓고 높게 ──
+        # ── 결과 Output — 셀 하단을 충분히 차지하도록 크게 ──
+        # 사용자가 결과를 한눈에 보면서 다음 셀에서 runner.last_result 로
+        # 후속 분석을 이어가는 패턴을 가정. min_height 를 크게 잡고
+        # max_height 는 두지 않아 큰 결과는 통째로 보임.
         self._output = W.Output(
             layout=W.Layout(border="1px solid #d8dde1",
-                            min_height="120px", max_height="720px",
+                            min_height="500px",
                             overflow="auto", padding="6px",
                             width="100%"),
         )
@@ -1397,6 +1417,8 @@ class SQLRunnerCM:
     def _on_run(self, _btn: Any) -> None:
         from IPython.display import display
         sql = self._textarea.value if self._textarea is not None else ""
+        # last_query 는 빈 SQL 이라도 일단 기록 (사용자가 디버깅 시 도움)
+        self.last_query = sql
         with self._output:
             self._output.clear_output()
             if not sql.strip():
@@ -1412,9 +1434,17 @@ class SQLRunnerCM:
                 result = self.on_execute(sql)
             except Exception as e:
                 import traceback
+                self.last_error = e
+                self.last_result = None
+                self.history.append({"query": sql, "result": None,
+                                      "error": e})
                 print(f"❌ {type(e).__name__}: {e}")
                 traceback.print_exc()
                 return
+            self.last_error = None
+            self.last_result = result
+            self.history.append({"query": sql, "result": result,
+                                  "error": None})
             self._render_result(result)
 
     def _render_result(self, result: Any) -> None:
