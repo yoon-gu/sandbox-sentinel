@@ -698,17 +698,19 @@ _BOOTSTRAP_JS_TPL = r"""
   var KEYWORDS = {keywords_json};
   var FUNCTIONS = {functions_json};
 
-  // ipywidgets 의 hidden Textarea 와 mount div 를 찾아 mount.
-  // ipywidgets 가 layout 을 비동기로 그릴 수 있어 폴링 + MutationObserver.
+  // ipywidgets 의 hidden Textarea (전체 SQL · 커서까지) 와 mount div 를 찾아
+  // mount. ipywidgets 가 layout 을 비동기로 그릴 수 있어 폴링.
   function tryMount(){{
     var mount = document.getElementById("cm-mount-" + UID);
     var taWrap = document.querySelector(".cm-ta-" + UID);
-    if(!mount || !taWrap) return false;
-    var ta = taWrap.querySelector("textarea");
-    if(!ta) return false;
+    var curWrap = document.querySelector(".cm-cursor-" + UID);
+    if(!mount || !taWrap || !curWrap) return false;
+    var ta  = taWrap.querySelector("textarea");
+    var cur = curWrap.querySelector("textarea");
+    if(!ta || !cur) return false;
     if(mount.dataset.mounted === "1") return true;
     mount.dataset.mounted = "1";
-    initCM(mount, ta);
+    initCM(mount, ta, cur);
     return true;
   }}
   if(!tryMount()){{
@@ -719,16 +721,18 @@ _BOOTSTRAP_JS_TPL = r"""
     }}, 50);
   }}
 
-  function initCM(mount, ta){{
+  function initCM(mount, ta, curTa){{
     if(typeof CodeMirror === "undefined"){{
       mount.innerHTML = '<div style="color:#a00;padding:8px">'+
         'CodeMirror 로드 실패 — Jupyter 노트북이 trusted 상태인지 확인하세요. '+
         '(File → Trust Notebook)</div>';
       return;
     }}
-    // hidden textarea 는 보이지 않게 하되 ipywidgets 의 sync 는 살아있도록 유지
-    taWrap = ta.closest(".cm-ta-" + UID);
-    if(taWrap){{ taWrap.style.display = "none"; }}
+    // hidden textarea 들은 보이지 않게 하되 ipywidgets 의 sync 는 살림
+    var taWrap  = ta.closest(".cm-ta-" + UID);
+    var curWrap = curTa.closest(".cm-cursor-" + UID);
+    if(taWrap)  {{ taWrap.style.display  = "none"; }}
+    if(curWrap) {{ curWrap.style.display = "none"; }}
 
     var cm = CodeMirror(mount, {{
       value: ta.value,
@@ -759,12 +763,25 @@ _BOOTSTRAP_JS_TPL = r"""
     }});
     cm.setSize("100%", 220);
 
-    // CM → hidden textarea 동기화 (Python 쪽 _textarea.value 가 자동 갱신됨)
+    // CM → hidden textarea 동기화. ta 는 전체 SQL, curTa 는 시작부터 커서
+    // 까지의 텍스트. Python 의 _update_suggest 는 curTa 를 observe 하여
+    // 커서가 화살표로 이동만 해도 컨텍스트 추천이 갱신됨.
+    function syncCursor(){{
+      var doc = cm.getDoc();
+      var before = doc.getRange({{line:0, ch:0}}, doc.getCursor());
+      curTa.value = before;
+      curTa.dispatchEvent(new Event("input",  {{ bubbles: true }}));
+      curTa.dispatchEvent(new Event("change", {{ bubbles: true }}));
+    }}
     cm.on("change", function(){{
       ta.value = cm.getValue();
       ta.dispatchEvent(new Event("input",  {{ bubbles: true }}));
       ta.dispatchEvent(new Event("change", {{ bubbles: true }}));
+      syncCursor();
     }});
+    cm.on("cursorActivity", syncCursor);
+    // 초기 1회
+    syncCursor();
 
     // 식별자 입력 중일 때 자동 popup
     cm.on("inputRead", function(cm, change){{
@@ -964,6 +981,7 @@ class SQLRunnerCM:
         self.on_execute = on_execute
 
         self._textarea = None
+        self._cursor_text = None    # CM cursor 위치까지의 텍스트 (cursorActivity 동기화용)
         self._run_box = None
         self._output = None
         self._suggest_box = None
@@ -1128,9 +1146,16 @@ class SQLRunnerCM:
                             border_radius="4px"),
         )
 
-        # ── 숨겨진 ipywidgets.Textarea (CM <-> Python 데이터 sync 채널) ──
+        # ── 숨겨진 ipywidgets.Textarea — CM <-> Python 데이터 sync 채널 ──
+        # _textarea       : 전체 SQL (▶ 실행 시 읽음)
+        # _cursor_text    : 시작부터 CM 커서 위치까지의 텍스트.
+        #                   cursorActivity 이벤트마다 JS 가 갱신해 보내므로
+        #                   화살표 키로 커서를 옮겨도 _update_suggest 가
+        #                   다시 호출되어 컨텍스트 추천이 갱신됨.
         self._textarea = W.Textarea(value=self.initial_query)
         self._textarea.add_class(f"cm-ta-{self._uid}")
+        self._cursor_text = W.Textarea(value=self.initial_query)
+        self._cursor_text.add_class(f"cm-cursor-{self._uid}")
 
         # ── CM mount div (ipywidgets.HTML 안에 빈 div) ──
         editor_html = W.HTML(
@@ -1175,8 +1200,10 @@ class SQLRunnerCM:
                             width="100%"),
         )
 
-        # ── 텍스트 변경 → 추천 칩 갱신 ──
-        self._textarea.observe(self._on_text_change, names="value")
+        # ── 커서까지의 텍스트 변경 → 추천 칩 갱신 ──
+        # _textarea(전체 SQL) 가 아닌 _cursor_text(시작~커서) 를 observe
+        # 하므로 화살표로 커서만 이동해도 추천 갱신.
+        self._cursor_text.observe(self._on_text_change, names="value")
         self._update_suggest(self.initial_query)
 
         # ── 우측 패널 조립 ──
@@ -1190,6 +1217,7 @@ class SQLRunnerCM:
             ),
             editor_html,
             self._textarea,                # display:none 처리됨 (JS)
+            self._cursor_text,             # display:none 처리됨 (JS)
             W.HTML(
                 '<div style="padding:3px 10px;background:#f7f8fa;'
                 'border:1px solid #d8dde1;border-top:0;border-bottom:0;'
