@@ -15,10 +15,14 @@ SQL Runner TUI — Textual 기반 single-file SQL 편집기 + 실행 위젯.
 --------
   1) 좌측 entity Tree — 컬럼 선택 후 Enter → 에디터 커서 위치에 인서트
   2) 우측 TextArea — SQL syntax highlight (Textual native, tree-sitter SQL)
-  3) Ctrl+Space → 컨텍스트 인식 자동완성 popup (ModalScreen)
+  3) **인라인 추천 OptionList** — 에디터 바로 아래에 항상 보이는 컨텍스트
+     인식 추천 리스트. 에디터 입력에 따라 자동 갱신.
+     · Tab    : 에디터 → 추천 리스트로 포커스 이동
+     · ↑↓     : 추천 후보 사이 이동
+     · Enter  : 선택 → 에디터 커서 위치에 인서트 + 에디터 복귀
+     · Esc/Tab: 에디터로 복귀 (선택 없이)
   4) Ctrl+R / F5 → on_execute(sql) 콜백 호출, DataTable 에 결과 표시
-  5) 하단 추천 칩 라인 — 항상 보이는 컨텍스트 추천 (005 와 동일 컨셉)
-  6) 외부 네트워크 / CDN / 바이너리 영속화 0 — 단일 .py 반입
+  5) 외부 네트워크 / CDN / 바이너리 영속화 0 — 단일 .py 반입
 
 사용 예시
 --------
@@ -39,7 +43,7 @@ SQL Runner TUI — Textual 기반 single-file SQL 편집기 + 실행 위젯.
 키 바인딩
 --------
     Ctrl+R / F5     ▶ 실행
-    Ctrl+Space      자동완성 popup
+    Tab             에디터 ↔ 인라인 추천 리스트 포커스 이동
     Ctrl+T          트리 포커스
     Ctrl+E          에디터 포커스
     Ctrl+L          에디터 비우기
@@ -232,77 +236,43 @@ def _build_app(*, on_execute, tables, notes, initial_query):
     from textual.widgets.option_list import Option
     from rich.text import Text
 
-    # ── Tab 키를 자동완성 popup 트리거로 재할당한 TextArea ──
-    # 원래 TextArea 의 Tab = indent 인데, IDE 처럼 Tab = 자동완성 으로
-    # 바꾸고 indent 는 직접 스페이스 입력 또는 Shift+Tab(dedent) 으로
-    # 대체. 서브클래스 BINDINGS 에 priority=True 로 주면 부모의 Tab
-    # 바인딩보다 먼저 동작.
+    # ── Tab 키를 인라인 추천 리스트 포커스 이동으로 재할당한 TextArea ──
+    # 원래 TextArea 의 Tab = indent. 이걸 "에디터 → 인라인 추천 리스트"
+    # 포커스 이동으로 바꾼다. priority=True 로 부모의 Tab 바인딩 가로챔.
     class _SqlTextArea(TextArea):
         BINDINGS = [
-            Binding("tab", "trigger_complete",
-                    description="자동완성", show=False, priority=True),
+            Binding("tab", "focus_suggest",
+                    description="추천 이동", show=False, priority=True),
         ]
 
-        def action_trigger_complete(self) -> None:
-            # 앱 레벨의 action_complete 로 위임 — 컨텍스트 분석 + popup
-            self.app.action_complete(auto=False)
+        def action_focus_suggest(self) -> None:
+            try:
+                ol = self.app.query_one("#suggest", _InlineSuggest)
+            except Exception:
+                self.app.bell()
+                return
+            if ol.option_count == 0:
+                self.app.bell()
+                return
+            ol.focus()
+            if ol.highlighted is None or ol.highlighted < 0:
+                ol.highlighted = 0
 
-    # ── 자동완성 popup 모달 ──
-    # auto=True (자동 트리거) 일 땐 살짝 작고 덜 침습적으로, 부모 화면이
-    # 보이도록 modal 배경을 투명에 가깝게. ESC = 취소 (현재 단어 끝까지
-    # auto-popup 일시 정지), Enter = 선택.
-    class _SuggestionPicker(ModalScreen[Optional[str]]):
+    # ── 인라인 추천 OptionList ──
+    # 에디터 바로 아래 항상 보이는 리스트. 에디터 입력에 따라 자동 갱신.
+    # Tab 으로 진입 → ↑↓ 이동 → Enter 인서트 → 자동으로 에디터 복귀.
+    # Esc / Tab 으로도 에디터 복귀 (toggle 느낌).
+    class _InlineSuggest(OptionList):
         BINDINGS = [
-            Binding("escape", "cancel", "Cancel"),
-            Binding("tab",    "cancel", "Cancel"),  # Tab 으로도 닫기 (toggle)
+            Binding("escape", "back_to_editor", show=False),
+            Binding("tab",    "back_to_editor", show=False),
         ]
-        DEFAULT_CSS = """
-        _SuggestionPicker { align: center middle; }
-        _SuggestionPicker.auto { align: right top; }
-        _SuggestionPicker > Vertical {
-            width: 60; height: 18; padding: 0 1;
-            border: thick $primary; background: $surface;
-        }
-        _SuggestionPicker.auto > Vertical {
-            width: 50; height: 14; margin: 6 4 0 0;
-            border: round $accent; background: $surface;
-        }
-        _SuggestionPicker OptionList { height: 1fr; }
-        _SuggestionPicker .header { color: $text-muted; }
-        """
 
-        def __init__(self, sugs: list, *, auto: bool = False) -> None:
-            super().__init__()
-            self._sugs = sugs
-            self._auto = auto
-
-        def compose(self) -> ComposeResult:
-            with Vertical():
-                hdr = ("[dim](자동) Enter 삽입 · Esc 또는 Tab 닫기[/]"
-                       if self._auto
-                       else f"[b]💡 추천 ({len(self._sugs)}개)[/]  "
-                            "↑↓ 이동 · Enter 선택 · Esc / Tab 닫기")
-                yield Static(Text.from_markup(hdr), classes="header")
-                opts = []
-                for i, s in enumerate(self._sugs):
-                    label = (f"{s['label']:<22}  "
-                             f"[dim]{s['kind']:<8} {s.get('meta','')}[/]")
-                    opts.append(Option(Text.from_markup(label), id=f"sug-{i}"))
-                yield OptionList(*opts, id="picker")
-
-        def on_mount(self) -> None:
-            if self._auto:
-                self.add_class("auto")
-            self.query_one("#picker", OptionList).focus()
-
-        def on_option_list_option_selected(
-            self, event: OptionList.OptionSelected
-        ) -> None:
-            idx = int(event.option_id.split("-")[1])
-            self.dismiss(self._sugs[idx]["value"])
-
-        def action_cancel(self) -> None:
-            self.dismiss(None)
+        def action_back_to_editor(self) -> None:
+            try:
+                self.app.query_one("#editor", _SqlTextArea).focus()
+            except Exception:
+                pass
 
     # ── 도움말 모달 ──
     class _HelpScreen(ModalScreen[None]):
@@ -319,7 +289,7 @@ def _build_app(*, on_execute, tables, notes, initial_query):
             with Vertical():
                 yield Static(Text.from_markup(
                     "[b]단축키[/]\n\n"
-                    "  [yellow]Tab[/]      자동완성 popup (수동 트리거)\n"
+                    "  [yellow]Tab[/]      에디터 → 인라인 추천 리스트로 포커스 이동\n"
                     "  [yellow]Ctrl+R[/]   ▶ 실행 (현재 SQL 을 on_execute 콜백에 전달)\n"
                     "  [yellow]F5[/]       ▶ 실행 (Ctrl+R 과 동일)\n"
                     "  [yellow]Ctrl+T[/]   트리 포커스 (테이블/컬럼 선택)\n"
@@ -327,11 +297,12 @@ def _build_app(*, on_execute, tables, notes, initial_query):
                     "  [yellow]Ctrl+L[/]   에디터 비우기\n"
                     "  [yellow]F1[/]       이 도움말\n"
                     "  [yellow]Ctrl+Q[/]   종료\n\n"
-                    "[b]자동 popup[/] (편집 중)\n\n"
-                    "  • 식별자 글자(영문/숫자/_/.) 를 칠 때마다 popup 자동 노출\n"
-                    "  • Enter 로 선택, Esc / Tab 으로 닫기\n"
-                    "  • Esc 로 닫으면 현재 단어가 끝날 때까지 다시 안 뜸\n"
-                    "    (계속 같은 단어를 치는 동안 방해 안 함)\n\n"
+                    "[b]인라인 추천 리스트[/] (에디터 바로 아래)\n\n"
+                    "  • 에디터 입력에 따라 [b]자동 갱신[/] (popup 아님 — 항상 보임)\n"
+                    "  • [yellow]Tab[/]   에디터에서 추천 리스트로 포커스 이동\n"
+                    "  • [yellow]↑↓[/]   추천 후보 사이 이동\n"
+                    "  • [yellow]Enter[/] 선택 → 에디터 커서 위치에 인서트 + 에디터 복귀\n"
+                    "  • [yellow]Esc / Tab[/] 에디터로 복귀 (선택 없이)\n\n"
                     "[b]트리 사용법[/]\n\n"
                     "  ↑↓ 이동, Enter 선택 → 에디터 커서 위치에 인서트.\n"
                     "  테이블 노드 = 테이블명 인서트, 컬럼 노드 = 컬럼명 인서트.\n\n"
@@ -350,13 +321,16 @@ def _build_app(*, on_execute, tables, notes, initial_query):
         Screen { background: $background; }
         #entities { width: 36; border-right: solid $accent; }
         #editor   { height: 14; border: round $accent; }
-        #suggest  {
-            height: 3; padding: 0 1; background: $panel;
-            border: round $secondary;
+        #ctx-label {
+            padding: 0 1; height: 1; color: $text-muted;
         }
+        #suggest {
+            height: 8; border: round $accent; background: $panel;
+        }
+        #suggest:focus { border: thick $primary; }
+        #suggest.empty { display: none; }
         #results-label { padding: 0 1; color: $text-muted; }
         #results  { height: 1fr; border: round $accent; }
-        #ctx      { color: $accent; }
         """
 
         BINDINGS = [
@@ -376,8 +350,7 @@ def _build_app(*, on_execute, tables, notes, initial_query):
             self._tables = tables
             self._notes = notes
             self._initial_query = initial_query
-            self._popup_open = False    # 자동 popup 재진입 차단
-            self._auto_popup_enabled = True
+            self._current_sugs: list = []   # 인라인 OptionList ↔ 인덱스 매핑
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
@@ -390,7 +363,8 @@ def _build_app(*, on_execute, tables, notes, initial_query):
                         id="editor",
                         soft_wrap=True,
                     )
-                    yield Static("", id="suggest")
+                    yield Static("", id="ctx-label")
+                    yield _InlineSuggest(id="suggest")
                     yield Static("📤 결과 (Ctrl+R 또는 F5 로 실행)",
                                  id="results-label")
                     yield DataTable(id="results", zebra_stripes=True)
@@ -436,41 +410,9 @@ def _build_app(*, on_execute, tables, notes, initial_query):
             # 에디터에 초기 포커스
             self.query_one("#editor", TextArea).focus()
 
-        # ── 에디터 텍스트 변경 → 추천 갱신 + 자동 popup ──
+        # ── 에디터 텍스트 변경 → 인라인 추천 갱신 ──
         def on_text_area_changed(self, event: TextArea.Changed) -> None:
-            ta = event.text_area
-            self._update_suggest(ta.text)
-
-            if self._popup_open:
-                return
-            text_before = ta.get_text_range(start=(0, 0),
-                                            end=ta.cursor_location)
-            current_word = self._current_word(ta.text, ta.cursor_location)
-
-            # ESC 로 닫혔던 상태라면, 사용자가 단어 경계를 넘기 전까진 재개
-            # 안 함 (같은 단어를 계속 치고 있는 것 = 사용자가 popup 안 원함)
-            if not self._auto_popup_enabled:
-                disabled_word = getattr(self, "_auto_disabled_word", "")
-                if (current_word == disabled_word
-                        or current_word.startswith(disabled_word)):
-                    return
-                # 단어 경계를 넘었다 → 자동 popup 재개
-                self._auto_popup_enabled = True
-
-            if not text_before:
-                return
-            last_ch = text_before[-1]
-            if not (last_ch.isalnum() or last_ch in "_."):
-                return
-            # 1글자 이상 입력 + 추천이 있을 때만 (너무 빨리 떠서 산만해지는
-            # 걸 방지)
-            if len(current_word) < 1:
-                return
-            sugs = get_suggestions(text_before, self._tables)
-            if not sugs:
-                return
-            # popup 자동 열기
-            self.action_complete(auto=True)
+            self._update_suggest(event.text_area.text)
 
         def _update_suggest(self, text: str) -> None:
             ctx = detect_context(text)
@@ -481,20 +423,53 @@ def _build_app(*, on_execute, tables, notes, initial_query):
                 "general": "범용",
             }.get(ctx, ctx)
 
-            sugs = get_suggestions(text, self._tables)[:14]
+            self._current_sugs = get_suggestions(text, self._tables)[:30]
+            ol = self.query_one("#suggest", _InlineSuggest)
+            ol.clear_options()
+
+            if not self._current_sugs:
+                ol.add_class("empty")
+                self.query_one("#ctx-label", Static).update(Text.from_markup(
+                    f"💡 컨텍스트: [bold cyan]{ctx_label}[/]  "
+                    "[dim](추천 없음)[/]"
+                ))
+                return
+            ol.remove_class("empty")
+
             kind_color = {
                 "table": "green", "column": "yellow",
                 "keyword": "cyan", "function": "magenta", "star": "white",
             }
-            chips: list[str] = []
-            for s in sugs:
+            options = []
+            for s in self._current_sugs:
                 color = kind_color.get(s["kind"], "white")
-                chips.append(f"[{color}]{s['label']}[/]")
-            chips_str = "  ".join(chips) if chips else "[dim](추천 없음)[/]"
+                meta = s.get("meta", "") or ""
+                label = (f"[{color}]{s['label']:<22}[/] "
+                         f"[dim]{s['kind']:<8} {meta}[/]")
+                options.append(Option(Text.from_markup(label)))
+            ol.add_options(options)
+            try:
+                ol.highlighted = 0
+            except Exception:
+                pass
 
-            self.query_one("#suggest", Static).update(Text.from_markup(
-                f"[b]💡 컨텍스트:[/] [bold cyan]{ctx_label}[/]\n   {chips_str}"
+            self.query_one("#ctx-label", Static).update(Text.from_markup(
+                f"💡 컨텍스트: [bold cyan]{ctx_label}[/]  "
+                f"[dim]· Tab 추천 이동 · ↑↓ 이동 · Enter 인서트 · "
+                f"Esc 에디터 복귀[/]"
             ))
+
+        # ── 인라인 OptionList Enter → 에디터 커서 위치에 인서트 ──
+        def on_option_list_option_selected(
+            self, event: OptionList.OptionSelected
+        ) -> None:
+            if event.option_list.id != "suggest":
+                return
+            idx = event.option_index
+            if 0 <= idx < len(self._current_sugs):
+                snippet = self._current_sugs[idx]["value"]
+                self._insert_at_cursor(snippet)
+            self.query_one("#editor", _SqlTextArea).focus()
 
         # ── 트리 노드 선택 → 에디터 인서트 ──
         def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
@@ -618,59 +593,6 @@ def _build_app(*, on_execute, tables, notes, initial_query):
             if len(s) > 80:
                 s = s[:77] + "..."
             return s
-
-        # ── 자동완성 popup ──
-        # auto=True : on_text_area_changed 에서 자동 트리거 (조용히 실패)
-        # auto=False: Tab 키로 명시적 트리거 (추천 없으면 bell)
-        def action_complete(self, auto: bool = False) -> None:
-            if self._popup_open:
-                return
-            editor = self.query_one("#editor", TextArea)
-            text_before = editor.get_text_range(
-                start=(0, 0), end=editor.cursor_location
-            )
-            sugs = get_suggestions(text_before, self._tables)[:30]
-            if not sugs:
-                if not auto:
-                    self.bell()
-                return
-            self._popup_open = True
-            self.push_screen(
-                _SuggestionPicker(sugs, auto=auto),
-                self._on_suggest_picked,
-            )
-
-        def _on_suggest_picked(self, snippet: Optional[str]) -> None:
-            self._popup_open = False
-            # popup 안에서 ESC(=cancel) → snippet=None.
-            # auto-popup 이 닫혔다는 건 사용자가 잠시 그만 하고 싶다는 뜻.
-            # 새 식별자를 새로 시작하기 전엔 다시 뜨지 않게.
-            if snippet is None:
-                self._auto_popup_enabled = False
-                # 에디터에 글자가 추가되거나 지워지면 다시 켜짐 (아래 watcher)
-                self._reenable_auto_after_word_break()
-                return
-            self._auto_popup_enabled = True
-            self._insert_at_cursor(snippet)
-
-        def _reenable_auto_after_word_break(self) -> None:
-            """ESC 로 popup 닫은 후, 사용자가 word boundary 를 넘으면 재개."""
-            editor = self.query_one("#editor", TextArea)
-            current_word = self._current_word(editor.text,
-                                              editor.cursor_location)
-            self._auto_disabled_word = current_word
-
-        def _current_word(self, text: str, cursor: tuple) -> str:
-            try:
-                line_idx, col = cursor
-                lines = text.split("\n")
-                if 0 <= line_idx < len(lines):
-                    line = lines[line_idx][:col]
-                    m = re.search(r"([\w_.]+)$", line)
-                    return m.group(1) if m else ""
-            except Exception:
-                pass
-            return ""
 
         # ── 기타 액션 ──
         def action_clear(self) -> None:
