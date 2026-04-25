@@ -154,8 +154,10 @@ def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
         if tname in tables:
             return [
                 {
-                    "value": f"{tname}.{c['name']}",
-                    "label": c["name"],
+                    "value": f"{tname}.{c['name']}",   # 실제 인서트 텍스트
+                    # 표시 라벨 — 타입을 괄호로 함께 노출 ("id (INT)")
+                    "label": (f"{c['name']} ({c.get('type','')})"
+                              if c.get("type") else c["name"]),
                     "kind": "column",
                     "meta": c.get("type", "") or tname,
                 }
@@ -175,8 +177,11 @@ def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
                 if c["name"] in seen:
                     continue
                 seen.add(c["name"])
-                meta = (c.get("type", "") + " · " if c.get("type") else "") + tname
-                cands.append({"value": c["name"], "label": c["name"],
+                type_str = c.get("type", "") or ""
+                # 추천 표시 라벨에 (TYPE) 동시 노출
+                col_label = f"{c['name']} ({type_str})" if type_str else c["name"]
+                meta = (type_str + " · " if type_str else "") + tname
+                cands.append({"value": c["name"], "label": col_label,
                               "kind": "column", "meta": meta})
     if ctx == "columns_or_star":
         cands.insert(0, {"value": "*", "label": "*",
@@ -430,8 +435,11 @@ _BOOTSTRAP_JS_TPL = r"""
         var list = SCHEMA[tname]
           .filter(function(c){{ return c.name.toLowerCase().indexOf(fp) === 0; }})
           .map(function(c){{
-            return {{ text: tname + "." + c.name,
-                     displayText: c.name + "  · " + (c.type || tname) }};
+            // 표시 라벨에 타입을 괄호로 동시 노출 ("id (INT)")
+            var disp = c.type
+              ? (c.name + " (" + c.type + ")")
+              : c.name;
+            return {{ text: tname + "." + c.name, displayText: disp }};
           }});
         return {{ list: list, from: CodeMirror.Pos(cur.line, start),
                  to: CodeMirror.Pos(cur.line, end) }};
@@ -453,9 +461,11 @@ _BOOTSTRAP_JS_TPL = r"""
         SCHEMA[tname].forEach(function(c){{
           if(seenCol[c.name]) return;
           seenCol[c.name] = 1;
-          cands.push({{ text: c.name,
-                       displayText: c.name + "  · " +
-                         (c.type ? c.type + " " : "") + tname }});
+          // 컬럼 추천 표시: "id (INT)  · users" 형태로 타입 괄호 노출
+          var disp = c.type
+            ? (c.name + " (" + c.type + ")  · " + tname)
+            : (c.name + "  · " + tname);
+          cands.push({{ text: c.name, displayText: disp }});
         }});
       }});
     }}
@@ -675,42 +685,27 @@ class SQLRunnerCM:
                         f'{escape(self.notes[tname])}</div>'
                     ))
 
-                # ── 컬럼: 한 줄에 하나, 'name  TYPE' 형식 + 호버 시 doc tooltip
+                # ── 컬럼: 컴팩트한 wrap-flex Button 칩 + 호버 시 type/doc tooltip
                 col_btns: list = []
                 for c in cols:
-                    type_str = c.get("type", "") or ""
-                    doc_str = c.get("doc", "") or ""
-                    if type_str:
-                        # 1줄 표시: "id  INTEGER" — Button description.
-                        # ipywidgets Button 은 알파 수치 정렬이 없어 다중 공백
-                        # 이 collapse 될 수 있으므로 NBSP 로 패딩.
-                        NBSP = " "
-                        pad_target = 16   # name 영역 폭 (chars)
-                        padded = c["name"] + NBSP * max(2, pad_target - len(c["name"]))
-                        desc = padded + type_str
-                    else:
-                        desc = c["name"]
-                    tooltip_parts = [c["name"]]
-                    if type_str:
-                        tooltip_parts.append(f": {type_str}")
-                    if doc_str:
-                        tooltip_parts.append(f"— {doc_str}")
-                    tooltip = "  ".join(tooltip_parts)
+                    tooltip = c["name"]
+                    if c.get("type"):
+                        tooltip += f" : {c['type']}"
+                    if c.get("doc"):
+                        tooltip += f" — {c['doc']}"
                     cbtn = W.Button(
-                        description=desc,
+                        description=c["name"],
                         tooltip=tooltip,
-                        layout=W.Layout(
-                            margin="0",
-                            width="218px", height="26px",
-                        ),
+                        layout=W.Layout(margin="1px", width="auto",
+                                        height="22px"),
                     )
-                    cbtn.add_class("cm-col-btn")   # 좌정렬+모노 CSS 매치
                     cbtn.style.button_color = "#ffffff"
                     cbtn.on_click(self._make_inserter(c["name"]))
                     col_btns.append(cbtn)
-                tree_children.append(W.VBox(
+                tree_children.append(W.HBox(
                     col_btns,
-                    layout=W.Layout(padding="0 8px 6px 14px"),
+                    layout=W.Layout(flex_flow="row wrap",
+                                    padding="0 8px 6px 14px"),
                 ))
 
         tree = W.VBox(
@@ -843,35 +838,11 @@ class SQLRunnerCM:
         """CodeMirror CSS+JS 한 번에 inject. 노트북당 1회만 호출되어도
         충분 (각 인스턴스가 매번 호출해도 idempotent — 브라우저는 동일 함수
         선언을 무시 / 재선언하지만 동작 영향 없음)."""
-        # 컬럼 Button 좌정렬 + 모노스페이스. ipywidgets 기본 Button 은
-        # 텍스트 중앙정렬이라 'name  TYPE' 한 줄 표시가 어색해짐.
-        # justify-content:flex-start 로 좌정렬, NBSP 패딩이 깔끔하게.
-        # font-size 13px / line-height 1.4 / min-height 26px 로 설정해
-        # 글자가 너무 작거나 겹치지 않도록.
-        col_btn_css = (
-            ".cm-col-btn{margin:0 !important;padding:0 !important}"
-            ".cm-col-btn button.jupyter-button{"
-            " justify-content:flex-start !important;"
-            " text-align:left !important;"
-            " padding:0 8px !important;"
-            " font-family:'SF Mono',Menlo,Consolas,monospace !important;"
-            " font-size:13px !important;"
-            " line-height:1.4 !important;"
-            " min-height:26px !important;"
-            " height:26px !important;"
-            " white-space:pre !important;"
-            " color:#1f2329 !important;"
-            "}"
-            ".cm-col-btn button.jupyter-button:hover{"
-            " background:#eef2f7 !important;"
-            "}"
-        )
         return (
             "<style>"
             + _CM_CSS + "\n" + _CM_HINT_CSS + "\n" + _CM_THEME_CSS
             + "\n.cm-mount .CodeMirror{height:auto;min-height:220px;"
             "font-family:'SF Mono',Menlo,Consolas,monospace;font-size:13px}"
-            + "\n" + col_btn_css
             + "</style>"
             + "<script>"
             + _CM_JS + "\n" + _CM_SQL_JS + "\n" + _CM_HINT_JS
