@@ -7,14 +7,16 @@
 | 항목 | 005 (HTML/JS only) | 006 (ipywidgets) | **007 (CodeMirror 인라인)** |
 |---|---|---|---|
 | inline popup 자동완성 | ✅ 커서 위치 floating | ❌ Button 칩 | ✅ Ctrl+Space + 자동 popup |
+| 컨텍스트 추천 칩 패널 (popup 외) | ✅ | ✅ | ✅ |
 | 커서 위치 정밀 인서트 | ✅ | ❌ 끝 append | ✅ 정확히 커서 위치 |
 | **에디터 자체** syntax 색 | ❌ | ❌ (별도 미리보기) | ✅ 에디터 내부 컬러링 |
 | line number / 라인 wrap | ❌ | ❌ | ✅ |
 | ▶ 실행 → Python 콜백 | ❌ | ✅ | ✅ |
+| 결과 자동 표 렌더 (모든 컬럼) | ❌ | ✅ | ✅ |
 | 단축키 실행 | ❌ | ❌ | ✅ Cmd/Ctrl+Enter |
 | dracula 다크 테마 | ❌ | (다크 monospace 까지) | ✅ 정식 dracula |
 | 의존성 | IPython | ipywidgets + IPython | ipywidgets + IPython + CM 인라인 |
-| 파일 크기 | ~30KB | ~30KB | **~270KB** (CM 번들 포함) |
+| 파일 크기 | ~30KB | ~30KB | **~280KB** (CM 번들 포함) |
 | Trusted notebook 필요 | (script 실행) | 위젯만 동작 | (script 실행) |
 
 **언제 005 를 쓰나** — 가장 가벼운 단일 파일을 원할 때, 커서 위치 인라인 popup 만 있으면 충분할 때.
@@ -38,15 +40,32 @@
   - 우: SQL Runner 패널
     - **CodeMirror 5 에디터** — SQL mode + dracula 다크 테마 + 라인 번호 + 라인 wrap + 자동 들여쓰기
     - 컨텍스트 인식 자동완성 popup (Ctrl/Cmd+Space, 식별자 입력 시 자동)
+    - **💡 추천 칩 패널** — popup 과 별개로 항상 보이는 컨텍스트 칩 (005 와 동일 컨셉). 클릭 시 CM 의 커서 위치에 인서트
     - **`▶ 실행`** / `📋 SQL 복사` / `🗑 지우기` 버튼
-    - 📤 Output 위젯 (DataFrame 자동 표 렌더)
+    - 📤 Output 위젯 — DataFrame 의 **모든 컬럼** 까지 잘리지 않고 표 렌더 (`pd.option_context` 적용)
     - **단축키**: Cmd/Ctrl+Enter = ▶ 실행, Ctrl/Cmd+Space = 자동완성, Tab = 들여쓰기
-- **컨텍스트 인식 자동완성** (005 의 anchor 정책을 JS 사이드로 그대로 재현):
+- **컨텍스트 인식 자동완성** (005 의 anchor 정책을 JS + Python 양쪽으로 재현):
   - `FROM` / `JOIN` 다음 → 테이블
   - `SELECT` 다음 → 컬럼 + `*` + 함수
   - `WHERE` / `AND` / `OR` / `ON` / `GROUP BY` / `ORDER BY` / `HAVING` 다음 → 컬럼
   - `table_name.` 입력 시 → 해당 테이블 컬럼만 한정
   - 시작/모호 → 키워드 + 함수 + 테이블 + 컬럼 종합
+  - **fallback 키워드/함수** — 어느 컨텍스트에서나 `WHE`, `GR`, `JOI` 같은 부분 입력에 매치되도록 모든 KEYWORDS / FUNCTIONS 가 후보 끝에 자동 추가됨
+
+## 다양한 백엔드와의 연동
+
+`on_execute` 는 `(sql: str) -> Any` 시그니처의 임의 함수면 됩니다 — sqlite 에 한정되지 않음.
+
+| 백엔드 | 패턴 | 반환 |
+|---|---|---|
+| SQLite + pandas | `lambda sql: pd.read_sql(sql, conn)` 또는 `with_sqlite()` 헬퍼 | DataFrame |
+| SQLite raw cursor | `conn.row_factory = Row; conn.execute(sql).fetchall()` | `list[dict]` (자동 DataFrame 변환) |
+| 메모리 dict / 캐시 | 자체 query 파서 | dict / list[dict] |
+| pandas DataFrame | `df.query(...)` / `pandasql.sqldf(...)` / `duckdb.sql(...).df()` | DataFrame |
+| REST API 사내 엔진 | `requests.post(api_url, json={'sql': sql}).json()['rows']` | list[dict] |
+| Spark / Snowflake / 사내 SQL | 해당 클라이언트의 `.sql(...).toPandas()` 등 | DataFrame |
+
+자세한 시연은 `examples/demo.ipynb` 의 §3 참고.
 
 ## 의존성
 
