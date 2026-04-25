@@ -766,7 +766,7 @@ _BOOTSTRAP_JS_TPL = r"""
         }},
       }},
     }});
-    cm.setSize("100%", 380);
+    cm.setSize("100%", 600);   // 약 30 줄 표시
 
     // CM → hidden textarea 동기화. ta 는 전체 SQL, curTa 는 시작부터 커서
     // 까지의 텍스트. Python 의 _update_suggest 는 curTa 를 observe 하여
@@ -1168,7 +1168,7 @@ class SQLRunnerCM:
         tree = W.VBox(
             tree_children,
             layout=W.Layout(width="240px", overflow="auto",
-                            max_height="640px",
+                            max_height="700px",   # 에디터 600px + 추천/액션 여유분
                             border="1px solid #c8ccd0",
                             border_radius="4px"),
         )
@@ -1188,7 +1188,7 @@ class SQLRunnerCM:
         editor_html = W.HTML(
             f'<div id="cm-mount-{self._uid}" '
             f'class="cm-mount" style="border:1px solid #c8ccd0;'
-            f'border-radius:4px;overflow:hidden;min-height:380px"></div>'
+            f'border-radius:4px;overflow:hidden;min-height:600px"></div>'
         )
 
         # ── 액션 버튼 + Output ──
@@ -1219,13 +1219,12 @@ class SQLRunnerCM:
                             min_height="32px"),
         )
 
-        # ── 결과 Output — 셀 하단을 충분히 차지하도록 크게 ──
-        # 사용자가 결과를 한눈에 보면서 다음 셀에서 runner.last_result 로
-        # 후속 분석을 이어가는 패턴을 가정. min_height 를 크게 잡고
-        # max_height 는 두지 않아 큰 결과는 통째로 보임.
+        # ── 결과 Output — 에디터(~30줄)에 공간을 양보, Output 은 컴팩트
+        # 사용자가 큰 결과를 보고 싶으면 다음 셀에서 runner.last_result 로
+        # 후속 분석을 이어가는 패턴 권장. Output min_height 는 작게.
         self._output = W.Output(
             layout=W.Layout(border="1px solid #d8dde1",
-                            min_height="500px",
+                            min_height="300px",
                             overflow="auto", padding="6px",
                             width="100%"),
         )
@@ -1298,7 +1297,7 @@ class SQLRunnerCM:
         return (
             "<style>"
             + _CM_CSS + "\n" + _CM_HINT_CSS + "\n" + _CM_THEME_CSS
-            + "\n.cm-mount .CodeMirror{height:auto;min-height:380px;"
+            + "\n.cm-mount .CodeMirror{height:auto;min-height:600px;"
             "font-family:'SF Mono',Menlo,Consolas,monospace;font-size:13px}"
             + "</style>"
             + "<script>"
