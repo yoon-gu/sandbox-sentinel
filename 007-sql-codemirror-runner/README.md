@@ -185,7 +185,6 @@ runner.show()
 │   ├── dracula.css
 │   └── LICENSE
 └── examples/
-    ├── basic_usage.py       # CLI 검증 (Jupyter 없이 단위 동작 확인)
     └── demo.ipynb           # 노트북 데모 (실행 가능 시나리오 포함)
 ```
 
@@ -221,7 +220,6 @@ cd 007-sql-codemirror-runner
 python _build.py
 # → sql_codemirror.py 가 갱신됨
 python sql_codemirror.py        # 자체 self-check (번들 크기 등)
-python examples/basic_usage.py  # CLI 검증
 ```
 
 `_assets/` 의 minified 파일은 [jsdelivr CDN](https://cdn.jsdelivr.net/npm/codemirror@5.65.16/) 등에서 받아 두면 됩니다 (빌드 시점 1회만 외부 네트워크 필요, 산출물에는 흔적 없음).

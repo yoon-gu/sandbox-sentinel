@@ -141,7 +141,6 @@ def on_execute(sql: str) -> Any:
 ├── metadata.json
 ├── LICENSE                 # MIT
 └── examples/
-    ├── basic_usage.py      # CLI 검증 (Jupyter 없이 highlight/detect_context/get_suggestions 단위 동작 확인)
     └── demo.ipynb          # 노트북 데모 (실행 가능 시나리오 포함)
 ```
 
