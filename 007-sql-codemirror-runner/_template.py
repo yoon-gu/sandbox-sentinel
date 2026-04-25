@@ -308,7 +308,7 @@ _BOOTSTRAP_JS_TPL = r"""
         }},
       }},
     }});
-    cm.setSize("100%", 220);
+    cm.setSize("100%", 380);
 
     // CM → hidden textarea 동기화. ta 는 전체 SQL, curTa 는 시작부터 커서
     // 까지의 텍스트. Python 의 _update_suggest 는 curTa 를 observe 하여
@@ -731,7 +731,7 @@ class SQLRunnerCM:
         editor_html = W.HTML(
             f'<div id="cm-mount-{self._uid}" '
             f'class="cm-mount" style="border:1px solid #c8ccd0;'
-            f'border-radius:4px;overflow:hidden;min-height:240px"></div>'
+            f'border-radius:4px;overflow:hidden;min-height:380px"></div>'
         )
 
         # ── 액션 버튼 + Output ──
@@ -841,7 +841,7 @@ class SQLRunnerCM:
         return (
             "<style>"
             + _CM_CSS + "\n" + _CM_HINT_CSS + "\n" + _CM_THEME_CSS
-            + "\n.cm-mount .CodeMirror{height:auto;min-height:220px;"
+            + "\n.cm-mount .CodeMirror{height:auto;min-height:380px;"
             "font-family:'SF Mono',Menlo,Consolas,monospace;font-size:13px}"
             + "</style>"
             + "<script>"
@@ -912,12 +912,17 @@ class SQLRunnerCM:
             "general": "범용",
         }.get(ctx, ctx)
 
+        # 첫 칩 (컨텍스트 라벨) 의 height/align 을 옆에 오는 ipywidgets.Button
+        # (height=22px) 과 픽셀 단위로 맞추기 위해 inline-flex + align-items
+        # + box-sizing border-box. line-height 도 명시해 텍스트 수직 중앙.
         children: list = [
             W.HTML(
-                f'<span style="display:inline-block;padding:3px 9px;'
-                f'margin:2px 6px 2px 0;background:#fff;'
-                f'border:1px solid #c8ccd0;border-radius:11px;'
-                f'font-size:11px;color:#1f2329"><b>컨텍스트:</b> '
+                f'<span style="display:inline-flex;align-items:center;'
+                f'height:22px;box-sizing:border-box;'
+                f'padding:0 10px;margin:2px 6px 2px 0;'
+                f'background:#fff;border:1px solid #c8ccd0;border-radius:11px;'
+                f'font-size:11px;line-height:1;color:#1f2329;white-space:nowrap">'
+                f'<b style="margin-right:4px">컨텍스트:</b>'
                 f'{escape(ctx_label)}</span>'
             ),
         ]
