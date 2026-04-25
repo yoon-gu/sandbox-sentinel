@@ -357,12 +357,23 @@ def _build_app(*, on_execute, tables, notes, initial_query):
             with Horizontal():
                 yield Tree("📚 Entities", id="entities")
                 with Vertical():
-                    yield _SqlTextArea.code_editor(
-                        self._initial_query,
-                        language="sql",
-                        id="editor",
-                        soft_wrap=True,
-                    )
+                    # 인라인 SQL syntax highlight 는 tree-sitter + tree_sitter_sql
+                    # 패키지가 모두 있어야 동작. 없으면 LanguageDoesNotExist 가
+                    # 발생하므로 plain text 로 fallback.
+                    try:
+                        editor = _SqlTextArea.code_editor(
+                            self._initial_query,
+                            language="sql",
+                            id="editor",
+                            soft_wrap=True,
+                        )
+                    except Exception:
+                        editor = _SqlTextArea.code_editor(
+                            self._initial_query,
+                            id="editor",
+                            soft_wrap=True,
+                        )
+                    yield editor
                     yield Static("", id="ctx-label")
                     yield _InlineSuggest(id="suggest")
                     yield Static("📤 결과 (Ctrl+R 또는 F5 로 실행)",
@@ -472,12 +483,25 @@ def _build_app(*, on_execute, tables, notes, initial_query):
             self.query_one("#editor", _SqlTextArea).focus()
 
         # ── 트리 노드 선택 → 에디터 인서트 ──
+        # 테이블 노드: 'SELECT * FROM <table>;' 로 에디터 전체 교체 (빠른 시작)
+        # 컬럼 노드 : 컬럼명을 현재 커서 위치에 인서트 (기존 동작)
         def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
             data = event.node.data
             if not data:
                 return
-            snippet = data["name"]
-            self._insert_at_cursor(snippet)
+            editor = self.query_one("#editor", _SqlTextArea)
+            if data.get("kind") == "table":
+                tname = data["name"]
+                new_text = f"SELECT * FROM {tname};"
+                editor.text = new_text
+                # 커서를 끝으로
+                try:
+                    editor.cursor_location = (0, len(new_text))
+                except Exception:
+                    pass
+            else:
+                self._insert_at_cursor(data["name"])
+            editor.focus()
 
         def _insert_at_cursor(self, snippet: str) -> None:
             editor = self.query_one("#editor", TextArea)
