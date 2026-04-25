@@ -1,0 +1,30 @@
+이 LICENSE 는 인라인 임베드된 CodeMirror v5.65.16 의 원본 라이선스 복제본입니다.
+sandbox-sentinel/007-sql-codemirror-runner/sql_codemirror.py 안에 CodeMirror 의
+core / mode/sql / addon/hint/show-hint / theme/dracula 가 raw-string 으로
+포함되어 있어 본 라이선스가 함께 적용됩니다.
+
+(원문은 https://github.com/codemirror/codemirror5/blob/master/LICENSE)
+
+----------------------------------------------------------------------
+
+MIT License
+
+Copyright (C) 2017 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.

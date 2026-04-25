@@ -1,0 +1,757 @@
+"""
+SQL Runner with CodeMirror inline (single-file, 폐쇄망 친화).
+
+005/006 와의 관계
+----------------
+  · 005 = HTML/JS 단독 SQL 편집기 (popup 자동완성, Python 콜백 없음)
+  · 006 = ipywidgets Textarea 기반 (실행 가능 + 라이브 강조 별도 프리뷰)
+  · 007 = **CodeMirror 5.65.16 인라인 임베드** — 에디터 자체에 syntax
+          highlight 색이 입혀지고, popup 자동완성도 inline 으로 동작.
+          ▶ 실행 버튼으로 Python 콜백 호출 (006 와 동일).
+
+포지셔닝 한 줄: "005 의 자유도 + 006 의 실행성 + 진짜 IDE 같은 에디터 체감"
+
+라이선스: MIT (CodeMirror) + MIT (오리지널 wrapper)
+생성: Code Conversion Agent
+
+핵심 기능
+--------
+  1) 좌측 entity 트리 — 005/006 와 동일 API (add_table / from_dict /
+     from_sqlite / from_dataframes), 클릭 시 에디터 커서 위치에 정확히 인서트
+  2) 우측 CodeMirror 에디터 — SQL syntax highlight, line number, dracula
+     dark theme. Ctrl+Space → 컨텍스트 인식 자동완성 popup
+  3) 컨텍스트 인식 자동완성 — 005 의 anchor 정책을 JS 사이드로 그대로 재현.
+     `FROM`/`JOIN` 다음 → 테이블, `SELECT` 다음 → 컬럼+`*`+함수, `table.`
+     입력 시 → 해당 테이블 컬럼만 등.
+  4) ▶ 실행 (Cmd/Ctrl+Enter) → `on_execute(sql)` Python 콜백 호출, 반환값을
+     Output 위젯에 display (DataFrame 도 그대로 표 렌더)
+  5) 외부 네트워크 / CDN / 바이너리 영속화 일절 없음 — single-file 반입
+
+사용 예시
+--------
+    from sql_codemirror import SQLRunnerCM
+    runner = SQLRunnerCM.with_sqlite("./demo.db")    # thread-safe 헬퍼
+    runner.set_query("SELECT * FROM users LIMIT 10;")
+    runner.show()
+
+또는
+
+    import pandas as pd, sqlite3
+    runner = SQLRunnerCM(on_execute=lambda sql: pd.read_sql(sql, conn))
+    runner.from_sqlite("./demo.db").show()
+"""
+from __future__ import annotations
+
+import json
+import re
+import sqlite3
+import uuid
+from html import escape
+from typing import Any, Callable, Iterable, Mapping, Optional, Union
+
+
+# %%BUNDLE%%
+
+
+# ===== 타입 alias =====
+
+ColumnSpec = Union[str, tuple, Mapping[str, Any]]
+
+
+# ===== SQL 키워드 / 함수 (JS 쪽 자동완성 정책과 공유) =====
+# 005 와 동일 세트 — 변경 시 양쪽 동기화 필요
+
+_KEYWORDS = [
+    "SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "IN", "LIKE", "IS", "NULL",
+    "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "ON", "USING", "AS",
+    "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "OFFSET",
+    "DISTINCT", "ALL", "UNION", "EXCEPT", "INTERSECT",
+    "INSERT", "UPDATE", "DELETE", "INTO", "VALUES", "SET",
+    "CREATE", "ALTER", "DROP", "TABLE", "INDEX", "VIEW", "WITH", "RECURSIVE",
+    "CASE", "WHEN", "THEN", "ELSE", "END",
+    "ASC", "DESC", "BETWEEN", "EXISTS",
+    "TRUE", "FALSE",
+]
+_FUNCTIONS = [
+    "COUNT", "SUM", "AVG", "MIN", "MAX",
+    "COALESCE", "NULLIF", "IFNULL",
+    "UPPER", "LOWER", "LENGTH", "SUBSTR", "TRIM", "REPLACE",
+    "ROUND", "FLOOR", "CEIL", "ABS",
+    "DATE", "DATETIME", "STRFTIME", "JULIANDAY",
+    "CAST",
+]
+
+
+# ===== 컬럼 스펙 정규화 =====
+
+def _normalize_column(c: ColumnSpec) -> dict:
+    if isinstance(c, str):
+        return {"name": c, "type": "", "doc": ""}
+    if isinstance(c, tuple):
+        return {
+            "name": c[0],
+            "type": c[1] if len(c) > 1 else "",
+            "doc": c[2] if len(c) > 2 else "",
+        }
+    if isinstance(c, Mapping):
+        return {
+            "name": str(c["name"]),
+            "type": str(c.get("type", "")),
+            "doc": str(c.get("doc", "")),
+        }
+    raise TypeError(f"알 수 없는 컬럼 스펙 형식: {type(c).__name__}")
+
+
+# ===== 에디터 부트스트랩 JS (CM 인스턴스 생성 + 컨텍스트 자동완성) =====
+# 이 문자열은 .format() 으로 placeholder 치환 후 <script> 안에 삽입됨.
+# 중괄호는 모두 `{{` `}}` 로 escape.
+
+_BOOTSTRAP_JS_TPL = r"""
+(function(){{
+  var UID = "{uid}";
+  var SCHEMA = {schema_json};
+  var KEYWORDS = {keywords_json};
+  var FUNCTIONS = {functions_json};
+
+  // ipywidgets 의 hidden Textarea 와 mount div 를 찾아 mount.
+  // ipywidgets 가 layout 을 비동기로 그릴 수 있어 폴링 + MutationObserver.
+  function tryMount(){{
+    var mount = document.getElementById("cm-mount-" + UID);
+    var taWrap = document.querySelector(".cm-ta-" + UID);
+    if(!mount || !taWrap) return false;
+    var ta = taWrap.querySelector("textarea");
+    if(!ta) return false;
+    if(mount.dataset.mounted === "1") return true;
+    mount.dataset.mounted = "1";
+    initCM(mount, ta);
+    return true;
+  }}
+  if(!tryMount()){{
+    var tries = 0;
+    var iv = setInterval(function(){{
+      tries++;
+      if(tryMount() || tries > 80){{ clearInterval(iv); }}
+    }}, 50);
+  }}
+
+  function initCM(mount, ta){{
+    if(typeof CodeMirror === "undefined"){{
+      mount.innerHTML = '<div style="color:#a00;padding:8px">'+
+        'CodeMirror 로드 실패 — Jupyter 노트북이 trusted 상태인지 확인하세요. '+
+        '(File → Trust Notebook)</div>';
+      return;
+    }}
+    // hidden textarea 는 보이지 않게 하되 ipywidgets 의 sync 는 살아있도록 유지
+    taWrap = ta.closest(".cm-ta-" + UID);
+    if(taWrap){{ taWrap.style.display = "none"; }}
+
+    var cm = CodeMirror(mount, {{
+      value: ta.value,
+      mode: "text/x-sql",
+      theme: "dracula",
+      lineNumbers: true,
+      lineWrapping: true,
+      indentUnit: 2,
+      tabSize: 2,
+      smartIndent: true,
+      matchBrackets: true,
+      autofocus: false,
+      hintOptions: {{
+        hint: contextHint,
+        completeSingle: false,
+        closeOnUnfocus: true,
+      }},
+      extraKeys: {{
+        "Ctrl-Space": "autocomplete",
+        "Cmd-Space":  "autocomplete",
+        "Cmd-Enter":  function(){{ triggerRun(); }},
+        "Ctrl-Enter": function(){{ triggerRun(); }},
+        "Tab": function(cm){{
+          if(cm.somethingSelected()){{ cm.indentSelection("add"); }}
+          else {{ cm.replaceSelection(Array(cm.getOption("indentUnit")+1).join(" "), "end", "+input"); }}
+        }},
+      }},
+    }});
+    cm.setSize("100%", 220);
+
+    // CM → hidden textarea 동기화 (Python 쪽 _textarea.value 가 자동 갱신됨)
+    cm.on("change", function(){{
+      ta.value = cm.getValue();
+      ta.dispatchEvent(new Event("input",  {{ bubbles: true }}));
+      ta.dispatchEvent(new Event("change", {{ bubbles: true }}));
+    }});
+
+    // 식별자 입력 중일 때 자동 popup
+    cm.on("inputRead", function(cm, change){{
+      if(change && change.text && change.text.length === 1){{
+        var t = change.text[0];
+        if(/^[A-Za-z_.]$/.test(t)){{
+          cm.showHint({{ hint: contextHint, completeSingle: false }});
+        }}
+      }}
+    }});
+
+    // entity 트리 클릭 → CM 커서 위치에 인서트
+    window["__cmInsert_" + UID] = function(snippet){{
+      var doc = cm.getDoc();
+      var cur = doc.getCursor();
+      // 마지막 부분 단어가 snippet 의 prefix 이면 치환, 아니면 그냥 삽입
+      var line = doc.getLine(cur.line);
+      var i = cur.ch;
+      while(i > 0 && /[\w_.]/.test(line[i-1])) i--;
+      var lastWord = line.substring(i, cur.ch);
+      if(lastWord && snippet.toLowerCase().indexOf(lastWord.toLowerCase()) === 0){{
+        doc.replaceRange(snippet, {{line: cur.line, ch: i}}, cur);
+      }} else {{
+        var sep = "";
+        if(cur.ch > 0){{
+          var prev = line[cur.ch-1];
+          if(prev && !/[\s(,.]/.test(prev)) sep = " ";
+        }}
+        doc.replaceRange(sep + snippet, cur);
+      }}
+      cm.focus();
+    }};
+
+    // ▶ 실행 외부 호출 hook
+    function triggerRun(){{
+      var btn = document.querySelector(".cm-run-" + UID + " button");
+      if(btn){{ btn.click(); }}
+    }}
+    window["__cmRun_" + UID] = triggerRun;
+    window["__cmEditor_" + UID] = cm;
+  }}
+
+  // ── 컨텍스트 인식 hint (005 JS 와 동일 정책) ──
+  var ANCHORS = {{
+    "SELECT":1,"FROM":1,"WHERE":1,"JOIN":1,"ON":1,"AND":1,"OR":1,
+    "GROUP":1,"ORDER":1,"HAVING":1,"LIMIT":1,"BY":1,
+    "INSERT":1,"UPDATE":1,"DELETE":1,"SET":1,"INTO":1,"VALUES":1,
+    "INNER":1,"LEFT":1,"RIGHT":1,"FULL":1,
+    "UNION":1,"EXCEPT":1,"INTERSECT":1,
+    "AS":1,"WITH":1
+  }};
+  var CTX_MAP = {{
+    "SELECT":"columns_or_star",
+    "FROM":"tables","JOIN":"tables","INTO":"tables","UPDATE":"tables",
+    "INNER":"join_continue","LEFT":"join_continue",
+    "RIGHT":"join_continue","FULL":"join_continue",
+    "ON":"columns","WHERE":"columns","AND":"columns","OR":"columns",
+    "GROUP_BY":"columns","ORDER_BY":"columns","HAVING":"columns","SET":"columns",
+    "LIMIT":"number","DELETE":"from_keyword",
+    "VALUES":"any","AS":"any","WITH":"any"
+  }};
+
+  function detectContext(textBefore){{
+    var s = textBefore
+      .replace(/--[^\n]*/g," ")
+      .replace(/\/\*[\s\S]*?\*\//g," ")
+      .replace(/'[^']*'/g," ")
+      .replace(/"[^"]*"/g," ");
+    var tokens = s.split(/\s+/).filter(function(t){{ return t.length > 0; }});
+    if(tokens.length === 0) return "start";
+    var last = null, lastIdx = -1;
+    for(var i = tokens.length-1; i >= 0; i--){{
+      var tu = tokens[i].toUpperCase();
+      if(ANCHORS[tu]){{ last = tu; lastIdx = i; break; }}
+    }}
+    if(last === null) return "start";
+    if((last === "GROUP" || last === "ORDER") &&
+       lastIdx + 1 < tokens.length &&
+       tokens[lastIdx+1].toUpperCase() === "BY"){{
+      last = last + "_BY";
+    }}
+    if(last === "BY" && lastIdx > 0){{
+      var prev = tokens[lastIdx-1].toUpperCase();
+      if(prev === "GROUP" || prev === "ORDER") last = prev + "_BY";
+    }}
+    return CTX_MAP[last] || "general";
+  }}
+
+  function contextHint(cm){{
+    var cur = cm.getCursor();
+    var line = cm.getLine(cur.line);
+    var start = cur.ch, end = cur.ch;
+    while(start > 0 && /[\w_.]/.test(line[start-1])) start--;
+    var word = line.substring(start, end);
+    var beforeAll = cm.getRange({{line:0,ch:0}}, cur);
+    var ctx = detectContext(beforeAll);
+
+    // table. qualifier 우선 처리
+    var dot = word.indexOf(".");
+    if(dot > 0){{
+      var tname = word.substring(0, dot);
+      var fp = word.substring(dot+1).toLowerCase();
+      if(SCHEMA[tname]){{
+        var list = SCHEMA[tname]
+          .filter(function(c){{ return c.name.toLowerCase().indexOf(fp) === 0; }})
+          .map(function(c){{
+            return {{ text: tname + "." + c.name,
+                     displayText: c.name + "  · " + (c.type || tname) }};
+          }});
+        return {{ list: list, from: CodeMirror.Pos(cur.line, start),
+                 to: CodeMirror.Pos(cur.line, end) }};
+      }}
+    }}
+
+    var cands = [];
+    var seenCol = {{}};
+
+    if(ctx === "tables" || ctx === "general" || ctx === "start"){{
+      Object.keys(SCHEMA).forEach(function(tname){{
+        cands.push({{ text: tname,
+                     displayText: tname + "  · table" }});
+      }});
+    }}
+    if(ctx === "columns" || ctx === "columns_or_star" ||
+       ctx === "general" || ctx === "start"){{
+      Object.keys(SCHEMA).forEach(function(tname){{
+        SCHEMA[tname].forEach(function(c){{
+          if(seenCol[c.name]) return;
+          seenCol[c.name] = 1;
+          cands.push({{ text: c.name,
+                       displayText: c.name + "  · " +
+                         (c.type ? c.type + " " : "") + tname }});
+        }});
+      }});
+    }}
+    if(ctx === "columns_or_star"){{
+      cands.unshift({{ text: "*", displayText: "*  · all columns" }});
+    }}
+    if(ctx === "join_continue"){{
+      cands.push({{ text: "JOIN", displayText: "JOIN  · join" }});
+      cands.push({{ text: "OUTER JOIN", displayText: "OUTER JOIN  · join" }});
+    }}
+    if(ctx === "from_keyword"){{
+      cands.push({{ text: "FROM", displayText: "FROM  · keyword" }});
+    }}
+    if(ctx === "general" || ctx === "start"){{
+      KEYWORDS.forEach(function(k){{
+        cands.push({{ text: k, displayText: k + "  · keyword" }});
+      }});
+      FUNCTIONS.forEach(function(f){{
+        cands.push({{ text: f + "(", displayText: f + "(  · function" }});
+      }});
+    }}
+    if(ctx === "columns" || ctx === "columns_or_star"){{
+      FUNCTIONS.forEach(function(f){{
+        cands.push({{ text: f + "(", displayText: f + "(  · function" }});
+      }});
+    }}
+
+    var fl = word.toLowerCase();
+    if(fl){{
+      cands = cands.filter(function(c){{
+        return c.text.toLowerCase().indexOf(fl) >= 0;
+      }});
+    }}
+    return {{
+      list: cands.slice(0, 50),
+      from: CodeMirror.Pos(cur.line, start),
+      to:   CodeMirror.Pos(cur.line, end),
+    }};
+  }}
+}})();
+"""
+
+
+# ===== SQLRunnerCM 클래스 =====
+
+class SQLRunnerCM:
+    """ipywidgets + 인라인 CodeMirror 5 SQL 편집기 + 실행 위젯.
+
+    Args:
+        on_execute: ``f(sql: str) -> Any`` 콜백. ▶ 실행 버튼이나
+            Cmd/Ctrl+Enter 단축키로 호출되며, 반환값이 None 이 아니면
+            Output 위젯에 ``display(...)`` 로 표시된다.
+    """
+
+    def __init__(self,
+                 on_execute: Optional[Callable[[str], Any]] = None) -> None:
+        self.tables: dict[str, list[dict]] = {}
+        self.notes: dict[str, str] = {}
+        self.initial_query: str = ""
+        self.on_execute = on_execute
+
+        self._textarea = None
+        self._run_box = None
+        self._output = None
+        self._uid = "u" + uuid.uuid4().hex[:10]
+
+    # ----- 편의 생성자 (006 의 with_sqlite 와 동일 패턴) -----
+
+    @classmethod
+    def with_sqlite(cls, db_path: str) -> "SQLRunnerCM":
+        """SQLite DB 경로 하나로 thread-safe SQLRunnerCM 즉시 구성.
+
+        ipywidgets 버튼 콜백은 Jupyter 커널의 IO 스레드에서 실행되어 외부
+        셀에서 만든 sqlite3.Connection 과 thread 가 다를 수 있다 (그 경우
+        ProgrammingError). 이 헬퍼는 매 호출마다 새 connect 를 열고 닫아
+        thread 문제를 회피한다. (pandas 필요)
+        """
+        def _run(sql: str) -> Any:
+            try:
+                import pandas as pd
+            except ImportError as e:  # pragma: no cover
+                raise RuntimeError(
+                    "with_sqlite 는 pandas 가 필요합니다. "
+                    "직접 on_execute 콜백을 작성하거나 pandas 설치 후 재시도."
+                ) from e
+            with sqlite3.connect(db_path) as conn:
+                return pd.read_sql(sql, conn)
+
+        runner = cls(on_execute=_run)
+        runner.from_sqlite(db_path)
+        return runner
+
+    # ----- 스키마 등록 (005/006 와 동일 API) -----
+
+    def add_table(self, name: str,
+                  columns: Iterable[ColumnSpec],
+                  description: str = "") -> "SQLRunnerCM":
+        self.tables[name] = [_normalize_column(c) for c in columns]
+        if description:
+            self.notes[name] = description
+        return self
+
+    def from_dict(self,
+                  schema: Mapping[str, Iterable[ColumnSpec]]) -> "SQLRunnerCM":
+        for tname, cols in schema.items():
+            self.add_table(tname, cols)
+        return self
+
+    def from_sqlite(self, path: str) -> "SQLRunnerCM":
+        conn = sqlite3.connect(path)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+                "ORDER BY name"
+            )
+            tnames = [row[0] for row in cur.fetchall()]
+            for t in tnames:
+                cur.execute(f"PRAGMA table_info({t})")
+                cols: list[ColumnSpec] = []
+                for _cid, cname, ctype, _nn, _dflt, pk in cur.fetchall():
+                    cols.append({
+                        "name": cname,
+                        "type": ctype or "",
+                        "doc": "PK" if pk else "",
+                    })
+                self.tables[t] = [_normalize_column(c) for c in cols]
+        finally:
+            conn.close()
+        return self
+
+    def from_dataframes(self,
+                        dataframes: Mapping[str, Any]) -> "SQLRunnerCM":
+        for name, df in dataframes.items():
+            cols: list[ColumnSpec] = []
+            try:
+                for col, dtype in zip(df.columns, df.dtypes):
+                    cols.append({"name": str(col),
+                                 "type": str(dtype), "doc": ""})
+            except AttributeError as e:
+                raise TypeError(
+                    f"from_dataframes 의 값은 pandas.DataFrame 이어야 합니다 ({name})"
+                ) from e
+            self.tables[name] = [_normalize_column(c) for c in cols]
+        return self
+
+    def set_query(self, query: str) -> "SQLRunnerCM":
+        self.initial_query = query
+        return self
+
+    # ----- 렌더 -----
+
+    def show(self) -> None:
+        try:
+            import ipywidgets as W
+            from IPython.display import display, HTML
+        except ImportError as e:  # pragma: no cover
+            raise RuntimeError(
+                "show() 는 Jupyter + ipywidgets 가 필요합니다."
+            ) from e
+
+        # ── 좌측 entity 트리 ──
+        tree_children: list = [
+            W.HTML(
+                '<div style="padding:8px 10px;font-weight:600;font-size:12px;'
+                'background:#eef0f3;border-bottom:1px solid #d8dde1">'
+                '📚 Entities</div>'
+            ),
+        ]
+        if not self.tables:
+            tree_children.append(W.HTML(
+                '<div style="padding:12px;color:#888;font-size:11px">'
+                '등록된 테이블이 없습니다. <br>'
+                '<code>add_table(...)</code> / <code>from_dict(...)</code> '
+                '로 추가하세요.</div>'
+            ))
+        else:
+            for tname, cols in self.tables.items():
+                tbtn = W.Button(
+                    description=f"📋 {tname}  ({len(cols)})",
+                    layout=W.Layout(width="218px", height="26px",
+                                    margin="2px 0 1px 0"),
+                )
+                tbtn.style.button_color = "#fafbfc"
+                tbtn.on_click(self._make_inserter(tname))
+                tree_children.append(tbtn)
+
+                if self.notes.get(tname):
+                    tree_children.append(W.HTML(
+                        f'<div style="padding:0 8px 2px 18px;font-size:10px;'
+                        f'color:#6c757d;font-style:italic">'
+                        f'{escape(self.notes[tname])}</div>'
+                    ))
+
+                col_btns: list = []
+                for c in cols:
+                    tooltip = c["name"]
+                    if c.get("type"):
+                        tooltip += f" : {c['type']}"
+                    if c.get("doc"):
+                        tooltip += f" — {c['doc']}"
+                    cbtn = W.Button(
+                        description=c["name"],
+                        tooltip=tooltip,
+                        layout=W.Layout(margin="1px", width="auto",
+                                        height="22px"),
+                    )
+                    cbtn.style.button_color = "#ffffff"
+                    cbtn.on_click(self._make_inserter(c["name"]))
+                    col_btns.append(cbtn)
+                tree_children.append(W.HBox(
+                    col_btns,
+                    layout=W.Layout(flex_flow="row wrap",
+                                    padding="0 8px 6px 14px"),
+                ))
+
+        tree = W.VBox(
+            tree_children,
+            layout=W.Layout(width="240px", overflow="auto",
+                            max_height="640px",
+                            border="1px solid #c8ccd0",
+                            border_radius="4px"),
+        )
+
+        # ── 숨겨진 ipywidgets.Textarea (CM <-> Python 데이터 sync 채널) ──
+        self._textarea = W.Textarea(value=self.initial_query)
+        self._textarea.add_class(f"cm-ta-{self._uid}")
+
+        # ── CM mount div (ipywidgets.HTML 안에 빈 div) ──
+        editor_html = W.HTML(
+            f'<div id="cm-mount-{self._uid}" '
+            f'class="cm-mount" style="border:1px solid #c8ccd0;'
+            f'border-radius:4px;overflow:hidden;min-height:240px"></div>'
+        )
+
+        # ── 액션 버튼 + Output ──
+        run_btn = W.Button(description="▶ 실행 (Cmd/Ctrl+Enter)",
+                           button_style="primary",
+                           layout=W.Layout(width="auto"))
+        copy_btn = W.Button(description="📋 SQL 복사",
+                            layout=W.Layout(width="auto"))
+        clear_btn = W.Button(description="🗑 지우기",
+                             layout=W.Layout(width="auto"))
+        run_btn.on_click(self._on_run)
+        copy_btn.on_click(self._on_copy)
+        clear_btn.on_click(self._on_clear)
+
+        self._run_box = W.HBox([run_btn], layout=W.Layout(padding="0"))
+        self._run_box.add_class(f"cm-run-{self._uid}")
+        actions = W.HBox(
+            [self._run_box, copy_btn, clear_btn],
+            layout=W.Layout(padding="4px 0"),
+        )
+
+        self._output = W.Output(
+            layout=W.Layout(border="1px solid #d8dde1",
+                            max_height="420px", overflow="auto",
+                            padding="4px"),
+        )
+
+        # ── 우측 패널 조립 ──
+        right = W.VBox([
+            W.HTML(
+                '<div style="padding:5px 10px;background:#eef0f3;'
+                'border:1px solid #d8dde1;border-radius:4px 4px 0 0;'
+                'font-size:11px">'
+                '<b>SQL Runner (CodeMirror)</b> · 좌측 클릭 → 커서 위치에 인서트 · '
+                'Ctrl+Space 자동완성 · Cmd/Ctrl+Enter 실행</div>'
+            ),
+            editor_html,
+            self._textarea,                # display:none 처리됨 (JS)
+            actions,
+            W.HTML(
+                '<div style="padding:3px 10px;background:#f7f8fa;'
+                'border:1px solid #d8dde1;border-top:0;border-bottom:0;'
+                'font-size:11px;color:#6c757d">📤 실행 결과</div>'
+            ),
+            self._output,
+        ], layout=W.Layout(flex="1", min_width="0"))
+
+        layout = W.HBox([tree, right], layout=W.Layout(width="100%"))
+
+        # 1. CSS + JS 번들 1회 주입
+        display(HTML(self._cm_bundle_html()))
+        # 2. ipywidgets 레이아웃
+        display(layout)
+        # 3. 부트스트랩 JS — 위 레이아웃의 hidden textarea / mount 를 찾아
+        #    CodeMirror 인스턴스 mount
+        display(HTML(self._cm_bootstrap_html()))
+
+    # ----- 내부 헬퍼 -----
+
+    def _cm_bundle_html(self) -> str:
+        """CodeMirror CSS+JS 한 번에 inject. 노트북당 1회만 호출되어도
+        충분 (각 인스턴스가 매번 호출해도 idempotent — 브라우저는 동일 함수
+        선언을 무시 / 재선언하지만 동작 영향 없음)."""
+        return (
+            "<style>"
+            + _CM_CSS + "\n" + _CM_HINT_CSS + "\n" + _CM_THEME_CSS
+            + "\n.cm-mount .CodeMirror{height:auto;min-height:220px;"
+            "font-family:'SF Mono',Menlo,Consolas,monospace;font-size:13px}"
+            + "</style>"
+            + "<script>"
+            + _CM_JS + "\n" + _CM_SQL_JS + "\n" + _CM_HINT_JS
+            + "</script>"
+        )
+
+    def _cm_bootstrap_html(self) -> str:
+        # 스키마 → JS 객체 (table → [{name,type,doc}])
+        schema_for_js = {
+            tname: [{"name": c["name"], "type": c.get("type", ""),
+                     "doc": c.get("doc", "")} for c in cols]
+            for tname, cols in self.tables.items()
+        }
+        js = _BOOTSTRAP_JS_TPL.format(
+            uid=self._uid,
+            schema_json=json.dumps(schema_for_js, ensure_ascii=False),
+            keywords_json=json.dumps(_KEYWORDS),
+            functions_json=json.dumps(_FUNCTIONS),
+        )
+        return f"<script>{js}</script>"
+
+    def _make_inserter(self, snippet: str) -> Callable[[Any], None]:
+        """좌측 entity 버튼 클릭 시 CM 커서 위치에 인서트.
+
+        JS 사이드의 `__cmInsert_<uid>` 가 mount 시 window 에 등록됨.
+        ipywidgets 의 button click 은 Python 콜백 → 다시 JS 호출이 필요해
+        IPython.display(HTML) 로 짧은 1-shot 스크립트를 발행한다.
+        """
+        snippet_js = (snippet
+                      .replace("\\", "\\\\")
+                      .replace("`", "\\`")
+                      .replace("$", "\\$"))
+
+        def _handler(_btn: Any) -> None:
+            from IPython.display import display, HTML
+            with self._output:
+                # 인서트는 결과 영역을 어지럽히지 않도록 invisible 영역에 발행
+                display(HTML(
+                    "<script>"
+                    f"(function(){{"
+                    f"var fn = window['__cmInsert_{self._uid}'];"
+                    f"if(fn) fn(`{snippet_js}`);"
+                    f"}})();"
+                    "</script>"
+                ))
+                # 위 스크립트만 1회 발행하면 되고 결과 영역은 다시 비움
+                self._output.clear_output()
+        return _handler
+
+    def _on_run(self, _btn: Any) -> None:
+        from IPython.display import display
+        sql = self._textarea.value if self._textarea is not None else ""
+        with self._output:
+            self._output.clear_output()
+            if not sql.strip():
+                print("⚠ SQL 이 비어있습니다.")
+                return
+            if self.on_execute is None:
+                print("on_execute 콜백이 등록되지 않았습니다.")
+                print("SQLRunnerCM(on_execute=lambda sql: pd.read_sql(sql, conn))")
+                print("처럼 콜백을 주입하면 ▶ 실행 시 호출됩니다.\n")
+                print(f"SQL:\n{sql}")
+                return
+            try:
+                result = self.on_execute(sql)
+                if result is not None:
+                    display(result)
+                else:
+                    print("✓ 실행 완료 (반환값 없음)")
+            except Exception as e:
+                import traceback
+                print(f"❌ {type(e).__name__}: {e}")
+                traceback.print_exc()
+
+    def _on_copy(self, _btn: Any) -> None:
+        from IPython.display import display, HTML
+        sql_js = (
+            (self._textarea.value if self._textarea is not None else "")
+            .replace("\\", "\\\\")
+            .replace("`", "\\`")
+            .replace("$", "\\$")
+        )
+        with self._output:
+            self._output.clear_output()
+            display(HTML(
+                "<script>(function(){"
+                "const t=`" + sql_js + "`;"
+                "if(navigator.clipboard&&navigator.clipboard.writeText){"
+                "navigator.clipboard.writeText(t).then("
+                "()=>{},()=>{alert('clipboard 차단 — 수동 복사 필요');}"
+                ");}else{alert('clipboard API 미지원');}"
+                "})();</script>"
+                '<div style="padding:4px 8px;color:#047857;font-size:12px">'
+                '✓ 클립보드에 복사 시도됨</div>'
+            ))
+
+    def _on_clear(self, _btn: Any) -> None:
+        if self._textarea is None:
+            return
+        from IPython.display import display, HTML
+        self._textarea.value = ""
+        # CM 본체도 비움 (textarea 만 비우면 CM 은 자기 buffer 를 그대로 보여줌)
+        with self._output:
+            self._output.clear_output()
+            display(HTML(
+                "<script>(function(){"
+                f"var ed = window['__cmEditor_{self._uid}'];"
+                "if(ed){ ed.setValue(''); ed.focus(); }"
+                "})();</script>"
+            ))
+            self._output.clear_output()
+
+
+# ===== __main__ =====
+
+if __name__ == "__main__":
+    # CLI 검증 — Jupyter 없이도 단위 동작 점검
+    print("sql_codemirror.py — CodeMirror 인라인 SQL 편집기 (single-file)")
+    print(f"  bundle sizes:")
+    print(f"    codemirror.min.js: {len(_CM_JS):>7,} bytes")
+    print(f"    sql.min.js       : {len(_CM_SQL_JS):>7,} bytes")
+    print(f"    show-hint.min.js : {len(_CM_HINT_JS):>7,} bytes")
+    print(f"    codemirror.css   : {len(_CM_CSS):>7,} bytes")
+    print(f"    show-hint.css    : {len(_CM_HINT_CSS):>7,} bytes")
+    print(f"    dracula.css      : {len(_CM_THEME_CSS):>7,} bytes")
+    print()
+
+    runner = SQLRunnerCM()
+    runner.add_table("users", ["id", "name", "email"], "사용자 마스터")
+    runner.add_table("orders", [
+        ("id", "INT"), ("user_id", "INT"),
+        ("amount", "REAL"), ("status", "TEXT"),
+    ])
+    print(f"등록 테이블: {list(runner.tables.keys())}")
+    print(f"orders 컬럼: {[c['name'] for c in runner.tables['orders']]}")
+    print(f"runner._uid: {runner._uid}")
+    print()
+    print("Jupyter 노트북에서 사용 예시:")
+    print("    from sql_codemirror import SQLRunnerCM")
+    print("    runner = SQLRunnerCM.with_sqlite('./demo.db')")
+    print("    runner.show()")

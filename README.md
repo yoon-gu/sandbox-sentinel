@@ -66,6 +66,7 @@ Claude Code는 다음 경로의 Skill만 자동 인식합니다.
 | 004 | [langgraph-prompt-toolkit-repl](004-langgraph-prompt-toolkit-repl/) | langgraph + prompt_toolkit (MIT · BSD) | 003 의 prompt_toolkit 판 — textual 없이도 동작 (ipython 전이 의존) |
 | 005 | [sql-editor-notebook](005-sql-editor-notebook/) | (오리지널 · MIT) | Jupyter 셀에서 동작하는 SQL 편집기 — 좌 entity 트리 + 우 쿼리 입력 + 컨텍스트 자동완성 (HTML/JS only) |
 | 006 | [sql-runner-notebook](006-sql-runner-notebook/) | (오리지널 · MIT) | 005 의 ipywidgets 판 — ▶ 실행 버튼으로 Python 콜백 호출 + 라이브 SQL 구문 강조 |
+| 007 | [sql-codemirror-runner](007-sql-codemirror-runner/) | CodeMirror 5.65.16 (MIT) | CodeMirror 인라인 임베드 — 에디터 자체에 syntax color + popup 자동완성 + Cmd/Ctrl+Enter 실행 |
 
 각 폴더의 `README.md`에 설치·사용법·제약이 한글로 정리되어 있습니다.
 

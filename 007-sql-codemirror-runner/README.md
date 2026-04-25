@@ -1,0 +1,185 @@
+# 007 - SQL Runner with CodeMirror (인라인 임베드 · 실행 가능)
+
+> **한 줄 요약**: CodeMirror 5.65.16 을 single-file `.py` 안에 통째로 인라인하여 Jupyter 셀에서 **에디터 자체에 syntax highlight + popup 자동완성** 이 적용되는 SQL Runner. ▶ 실행 (Cmd/Ctrl+Enter) 으로 Python 콜백 호출.
+
+## 005 / 006 / 007 선택 가이드
+
+| 항목 | 005 (HTML/JS only) | 006 (ipywidgets) | **007 (CodeMirror 인라인)** |
+|---|---|---|---|
+| inline popup 자동완성 | ✅ 커서 위치 floating | ❌ Button 칩 | ✅ Ctrl+Space + 자동 popup |
+| 커서 위치 정밀 인서트 | ✅ | ❌ 끝 append | ✅ 정확히 커서 위치 |
+| **에디터 자체** syntax 색 | ❌ | ❌ (별도 미리보기) | ✅ 에디터 내부 컬러링 |
+| line number / 라인 wrap | ❌ | ❌ | ✅ |
+| ▶ 실행 → Python 콜백 | ❌ | ✅ | ✅ |
+| 단축키 실행 | ❌ | ❌ | ✅ Cmd/Ctrl+Enter |
+| dracula 다크 테마 | ❌ | (다크 monospace 까지) | ✅ 정식 dracula |
+| 의존성 | IPython | ipywidgets + IPython | ipywidgets + IPython + CM 인라인 |
+| 파일 크기 | ~30KB | ~30KB | **~270KB** (CM 번들 포함) |
+| Trusted notebook 필요 | (script 실행) | 위젯만 동작 | (script 실행) |
+
+**언제 005 를 쓰나** — 가장 가벼운 단일 파일을 원할 때, 커서 위치 인라인 popup 만 있으면 충분할 때.
+**언제 006 를 쓰나** — 보수적 환경(인라인 `<script>` 차단) 에서도 ipywidgets 만으로 동작이 필요할 때.
+**언제 007 을 쓰나** — 진짜 IDE 같은 편집 체감(에디터 내부 syntax color · 라인 번호 · Ctrl+Space) 이 필요하고, 270KB 단일 파일과 trusted notebook 환경이 허용될 때.
+
+## 원본 출처
+
+| 항목 | 값 |
+|---|---|
+| 라이브러리 | [CodeMirror 5.65.16](https://github.com/codemirror/codemirror5) (legacy v5 — 의도적으로 v6 미사용. v6 는 ESM 번들러 필요) |
+| 라이선스 | MIT (`LICENSE` 참조 — CodeMirror 원본 라이선스 복제) |
+| 포함 모듈 | core / `mode/sql` / `addon/hint/show-hint` / `theme/dracula` |
+| 합계 minified bundle | ~244 KB (raw, gzip 적용 시 더 작음) |
+
+## 기능 요약
+
+- **`SQLRunnerCM(on_execute=fn).show()` 한 줄로 실행 가능 위젯 렌더**
+- **레이아웃** (HBox 좌·우 분할):
+  - 좌: 📚 Entity 트리 — 테이블 헤더 + 컬럼 모두 `ipywidgets.Button`. 클릭 → CM 의 **현재 커서 위치** 에 인서트 (마지막 부분 단어가 prefix 면 자동 치환)
+  - 우: SQL Runner 패널
+    - **CodeMirror 5 에디터** — SQL mode + dracula 다크 테마 + 라인 번호 + 라인 wrap + 자동 들여쓰기
+    - 컨텍스트 인식 자동완성 popup (Ctrl/Cmd+Space, 식별자 입력 시 자동)
+    - **`▶ 실행`** / `📋 SQL 복사` / `🗑 지우기` 버튼
+    - 📤 Output 위젯 (DataFrame 자동 표 렌더)
+    - **단축키**: Cmd/Ctrl+Enter = ▶ 실행, Ctrl/Cmd+Space = 자동완성, Tab = 들여쓰기
+- **컨텍스트 인식 자동완성** (005 의 anchor 정책을 JS 사이드로 그대로 재현):
+  - `FROM` / `JOIN` 다음 → 테이블
+  - `SELECT` 다음 → 컬럼 + `*` + 함수
+  - `WHERE` / `AND` / `OR` / `ON` / `GROUP BY` / `ORDER BY` / `HAVING` 다음 → 컬럼
+  - `table_name.` 입력 시 → 해당 테이블 컬럼만 한정
+  - 시작/모호 → 키워드 + 함수 + 테이블 + 컬럼 종합
+
+## 의존성
+
+| 사용 | 패키지 | 용도 |
+|---|---|---|
+| 필수 | `ipywidgets` | 위젯 framework + Python ↔ JS 데이터 동기화 |
+| 필수 | `IPython` | display 통합 |
+| 선택 | `pandas` | `on_execute=lambda sql: pd.read_sql(sql, conn)` 패턴 시 |
+| 전이 | (없음) | sqlite3 stdlib · 외부 의존 추가 0 |
+
+> CodeMirror 자체는 `.py` 안에 raw-string 으로 인라인되어 있어 별도 패키지 설치 불필요.
+
+## 사용 예시
+
+### 빠른 시작 — 편의 메서드
+
+```python
+from sql_codemirror import SQLRunnerCM
+
+runner = SQLRunnerCM.with_sqlite("./demo.db")    # ⭐ thread-safe 자동 처리
+runner.set_query("SELECT * FROM users LIMIT 10;")
+runner.show()
+```
+
+`with_sqlite()` 는 매 ▶ 실행마다 새 connection 을 열고 닫아 ipywidgets 의 thread 이슈를 자동 회피합니다 (pandas 필요).
+
+### 직접 콜백 — 공유 connection 패턴
+
+```python
+import sqlite3, pandas as pd
+from sql_codemirror import SQLRunnerCM
+
+# ⚠ ipywidgets 버튼 콜백은 다른 스레드에서 실행되므로 check_same_thread=False 필요
+conn = sqlite3.connect("./demo.db", check_same_thread=False)
+
+runner = SQLRunnerCM(on_execute=lambda sql: pd.read_sql(sql, conn))
+runner.from_sqlite("./demo.db")
+runner.show()
+```
+
+### `on_execute` 콜백 시그니처
+
+```python
+def on_execute(sql: str) -> Any:
+    # CodeMirror → hidden Textarea 동기화로 항상 최신 텍스트가 전달됨
+    # 반환값 None → "실행 완료 (반환값 없음)" 표시
+    # 반환값 있으면 IPython.display(value) 로 Output 위젯에 렌더
+    return pd.read_sql(sql, my_connection)
+```
+
+콜백 미등록 시 ▶ 실행 클릭 → 안내 메시지 + SQL 출력만 표시 (시연용).
+
+### 직접 등록
+
+```python
+from sql_codemirror import SQLRunnerCM
+
+runner = SQLRunnerCM(on_execute=my_executor)
+runner.add_table("users", ["id", "name", "email"], description="사용자 마스터")
+runner.add_table("orders", [
+    ("id", "INT"),
+    ("user_id", "INT"),
+    ("amount", "REAL"),
+    ("status", "TEXT"),
+])
+runner.show()
+```
+
+### 단축키 정리
+
+| 키 | 동작 |
+|---|---|
+| **Cmd / Ctrl + Enter** | ▶ 실행 (= on_execute 호출) |
+| **Cmd / Ctrl + Space** | 자동완성 popup |
+| **식별자 입력 중** | 자동완성 popup 자동 노출 (.도 trigger) |
+| **Tab** | 들여쓰기 (블록 선택 시 indent 추가) |
+
+## 파일 구조
+
+```
+007-sql-codemirror-runner/
+├── README.md
+├── sql_codemirror.py        # ⭐ single-file 반입 단위 (~270KB, CM 인라인 포함)
+├── metadata.json
+├── LICENSE                  # MIT (CodeMirror 원본 라이선스 복제)
+├── _build.py                # (build only) 자산 → single-file 생성기
+├── _template.py             # (build only) wrapper Python 템플릿
+├── _assets/                 # (build only) CodeMirror v5.65.16 원본 자산
+│   ├── codemirror.min.js
+│   ├── codemirror.css
+│   ├── sql.min.js
+│   ├── show-hint.min.js
+│   ├── show-hint.css
+│   ├── dracula.css
+│   └── LICENSE
+└── examples/
+    ├── basic_usage.py       # CLI 검증 (Jupyter 없이 단위 동작 확인)
+    └── demo.ipynb           # 노트북 데모 (실행 가능 시나리오 포함)
+```
+
+> **반입 단위는 `sql_codemirror.py` 하나** 입니다. `_build.py` / `_template.py` / `_assets/` 는 빌드 시점에만 사용되며 폐쇄망에 반입할 필요가 없습니다.
+
+## 폐쇄망 친화 체크
+
+| 항목 | 상태 |
+|---|---|
+| 외부 네트워크 / CDN | ❌ 없음 (CSS/JS 모두 raw-string 인라인) |
+| `<link href>` / `<script src>` | ❌ 없음 |
+| `//# sourceMappingURL=` 외부 .map 참조 | ❌ 없음 (build 시 제거) |
+| 새 서버 / 포트 | ❌ 없음 |
+| 바이너리 영속화 | ❌ 없음 |
+| 단일 반입 단위 | `sql_codemirror.py` 한 파일 |
+| 추가 패키지 | ipywidgets + IPython (이미 스택 포함) |
+
+## 알려진 제약 / 한계
+
+- **Trusted notebook 필요** — JupyterLab 의 untrusted 노트북에서는 인라인 `<script>` 가 차단되어 CodeMirror 가 mount 되지 않음 (`File → Trust Notebook`). 이 환경 제약이 부담이라면 **006 사용 권장** (ipywidgets 만으로 동작).
+- **파일 크기 ~270KB** — 005/006(각 ~30KB) 보다 약 9배. 보안 검토 분량이 늘어남. 다만 **CodeMirror MIT 라이선스 한 건만 추가 검토** 하면 끝.
+- **CodeMirror 5 (legacy)** — v6 가 아닌 v5 를 의도적으로 선택. v6 는 ESM 번들러(rollup/esbuild) 가 필요해 raw-string 인라인이 사실상 불가. v5 는 단일 IIFE 번들이라 인라인 적합. v5 는 유지보수 모드지만 SQL 모드/show-hint 만 쓰는 본 용도엔 충분.
+- **CTE / 서브쿼리 경계 부정확** — 005/006 와 동일하게 간이 토큰 분리. 복잡한 쿼리에선 추천이 어색할 수 있음.
+- **comm channel 비공개 사용** — CM 의 변경값을 hidden ipywidgets.Textarea 의 native `input` 이벤트로 동기화. 향후 ipywidgets 가 내부 동기 메커니즘을 변경하면 깨질 수 있음 (현재 v7 / v8 까지 안정).
+- **CodeMirror v5 EOL 주시** — 보안 패치는 들어오지만 새 기능은 v6 로만 추가됨. 본 변환물은 SQL 자동완성/하이라이트만 쓰므로 큰 영향 없음.
+
+## 빌드 (관리자용)
+
+`_assets/` 의 자산을 갱신하거나 wrapper 코드를 수정한 후 단일 파일을 재생성:
+
+```bash
+cd 007-sql-codemirror-runner
+python _build.py
+# → sql_codemirror.py 가 갱신됨
+python sql_codemirror.py        # 자체 self-check (번들 크기 등)
+python examples/basic_usage.py  # CLI 검증
+```
+
+`_assets/` 의 minified 파일은 [jsdelivr CDN](https://cdn.jsdelivr.net/npm/codemirror@5.65.16/) 등에서 받아 두면 됩니다 (빌드 시점 1회만 외부 네트워크 필요, 산출물에는 흔적 없음).
