@@ -29,7 +29,7 @@
     "Ctrl+R / F5 — ▶ 실행 → on_execute(sql) 콜백 호출 → 결과를 DataTable 에 표 변환",
     "Ctrl+Space — 자동완성 popup (ModalScreen + OptionList, 컨텍스트 인식)",
     "컨텍스트 인식 정책 (005~007 과 동일): FROM→테이블, SELECT→컬럼, table.→qualifier, fallback 으로 KEYWORDS/FUNCTIONS 항상 후보",
-    "Tree 테이블 노드 선택 → 에디터를 'SELECT * FROM <table>;' 로 교체 (빠른 시작), 컬럼 노드 선택 → 컬럼명을 현재 커서 위치에 인서트",
+    "Tree 노드 선택 (테이블/컬럼) → 이름을 현재 커서 위치에 인서트 (마지막 부분 단어 prefix 매치 시 치환)",
     "DataFrame 자동 표 변환, list[dict] / list[tuple] 도 지원",
     "외부 네트워크/CDN/바이너리 영속화 0 — single-file .py 반입"
   ],
