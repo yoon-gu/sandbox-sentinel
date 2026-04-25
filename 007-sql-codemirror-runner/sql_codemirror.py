@@ -613,8 +613,8 @@ def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
             return [
                 {
                     "value": f"{tname}.{c['name']}",   # 실제 인서트 텍스트
-                    # 표시 라벨 — 타입을 괄호로 함께 노출 ("id (INT)")
-                    "label": (f"{c['name']} ({c.get('type','')})"
+                    # 표시 라벨 — 타입을 짧은 이모지로 함께 노출 ("id 🔢")
+                    "label": (f"{c['name']} {_short_type(c.get('type',''))}"
                               if c.get("type") else c["name"]),
                     "kind": "column",
                     "meta": c.get("type", "") or tname,
@@ -636,8 +636,9 @@ def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
                     continue
                 seen.add(c["name"])
                 type_str = c.get("type", "") or ""
-                # 추천 표시 라벨에 (TYPE) 동시 노출
-                col_label = f"{c['name']} ({type_str})" if type_str else c["name"]
+                # 추천 표시 라벨에 짧은 타입 이모지 동시 노출 ("id 🔢")
+                col_label = (f"{c['name']} {_short_type(type_str)}"
+                              if type_str else c["name"])
                 meta = (type_str + " · " if type_str else "") + tname
                 cands.append({"value": c["name"], "label": col_label,
                               "kind": "column", "meta": meta})
@@ -670,6 +671,35 @@ def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
     if last_lower:
         cands = [c for c in cands if last_lower in c["label"].lower()]
     return cands[:30]
+
+
+# ===== SQL 타입명 → 짧은 이모지 매핑 =====
+# 추천 표시할 때 'id (INTEGER)' 처럼 길게 나오는 게 산만해서, 대표 이모지
+# 한 글자로 단축. 알 수 없는 타입은 첫 글자만 사용.
+# 적용 위치: Python get_suggestions (chip 추천) + JS contextHint (popup).
+
+def _short_type(t: str) -> str:
+    if not t:
+        return ""
+    u = t.upper()
+    if "INT" in u or "SERIAL" in u:
+        return "🔢"
+    if any(k in u for k in ("REAL", "FLOAT", "DOUBLE", "NUMERIC",
+                             "DECIMAL", "MONEY")):
+        return "📊"
+    if any(k in u for k in ("CHAR", "TEXT", "STRING", "CLOB")):
+        return "📝"
+    if any(k in u for k in ("TIMESTAMP", "DATE", "TIME")):
+        return "📅"
+    if "BOOL" in u:
+        return "✓"
+    if any(k in u for k in ("BLOB", "BINARY", "BYTEA")):
+        return "📦"
+    if "JSON" in u:
+        return "🧬"
+    if "UUID" in u:
+        return "🆔"
+    return u[:1] or "?"
 
 
 # ===== 컬럼 스펙 정규화 =====
@@ -829,6 +859,21 @@ _BOOTSTRAP_JS_TPL = r"""
     window["__cmEditor_" + UID] = cm;
   }}
 
+  // SQL 타입명을 짧은 이모지로 단축. Python _short_type 과 동일 매핑.
+  function shortType(t){{
+    if(!t) return "";
+    var u = t.toUpperCase();
+    if(u.indexOf("INT")>=0 || u.indexOf("SERIAL")>=0) return "🔢";
+    if(/(REAL|FLOAT|DOUBLE|NUMERIC|DECIMAL|MONEY)/.test(u)) return "📊";
+    if(/(CHAR|TEXT|STRING|CLOB)/.test(u)) return "📝";
+    if(/(TIMESTAMP|DATE|TIME)/.test(u)) return "📅";
+    if(u.indexOf("BOOL")>=0) return "✓";
+    if(/(BLOB|BINARY|BYTEA)/.test(u)) return "📦";
+    if(u.indexOf("JSON")>=0) return "🧬";
+    if(u.indexOf("UUID")>=0) return "🆔";
+    return u.substring(0,1) || "?";
+  }}
+
   // ── 컨텍스트 인식 hint (005 JS 와 동일 정책) ──
   var ANCHORS = {{
     "SELECT":1,"FROM":1,"WHERE":1,"JOIN":1,"ON":1,"AND":1,"OR":1,
@@ -893,10 +938,8 @@ _BOOTSTRAP_JS_TPL = r"""
         var list = SCHEMA[tname]
           .filter(function(c){{ return c.name.toLowerCase().indexOf(fp) === 0; }})
           .map(function(c){{
-            // 표시 라벨에 타입을 괄호로 동시 노출 ("id (INT)")
-            var disp = c.type
-              ? (c.name + " (" + c.type + ")")
-              : c.name;
+            // 표시 라벨에 짧은 타입 이모지 ("id 🔢")
+            var disp = c.type ? (c.name + " " + shortType(c.type)) : c.name;
             return {{ text: tname + "." + c.name, displayText: disp }};
           }});
         return {{ list: list, from: CodeMirror.Pos(cur.line, start),
@@ -919,9 +962,9 @@ _BOOTSTRAP_JS_TPL = r"""
         SCHEMA[tname].forEach(function(c){{
           if(seenCol[c.name]) return;
           seenCol[c.name] = 1;
-          // 컬럼 추천 표시: "id (INT)  · users" 형태로 타입 괄호 노출
+          // 컬럼 추천 표시: "id 🔢  · users" 형태 (타입은 짧은 이모지)
           var disp = c.type
-            ? (c.name + " (" + c.type + ")  · " + tname)
+            ? (c.name + " " + shortType(c.type) + "  · " + tname)
             : (c.name + "  · " + tname);
           cands.push({{ text: c.name, displayText: disp }});
         }});
