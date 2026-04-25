@@ -685,14 +685,13 @@ class SQLRunnerCM:
                         f'{escape(self.notes[tname])}</div>'
                     ))
 
-                # ── 컬럼: 컴팩트한 wrap-flex Button 칩 + 호버 시 type/doc tooltip
+                # ── 컬럼: 컴팩트한 wrap-flex Button 칩 + 호버 시 doc 만 노출
+                # 컬럼명은 칩 자체에 표시되니 tooltip 에 중복할 필요 없고,
+                # type 도 자동완성 추천 popup 에서 (TYPE) 으로 보여주므로 호버
+                # 에는 description (doc) 만. doc 가 없는 컬럼은 tooltip 미노출.
                 col_btns: list = []
                 for c in cols:
-                    tooltip = c["name"]
-                    if c.get("type"):
-                        tooltip += f" : {c['type']}"
-                    if c.get("doc"):
-                        tooltip += f" — {c['doc']}"
+                    tooltip = c.get("doc", "") or ""
                     cbtn = W.Button(
                         description=c["name"],
                         tooltip=tooltip,
