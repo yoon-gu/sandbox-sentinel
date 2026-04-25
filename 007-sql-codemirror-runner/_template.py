@@ -701,7 +701,7 @@ class SQLRunnerCM:
                         tooltip=tooltip,
                         layout=W.Layout(
                             margin="0",
-                            width="218px", height="22px",
+                            width="218px", height="26px",
                         ),
                     )
                     cbtn.add_class("cm-col-btn")   # 좌정렬+모노 CSS 매치
@@ -784,8 +784,9 @@ class SQLRunnerCM:
         self._cursor_text.observe(self._on_text_change, names="value")
         self._update_suggest(self.initial_query)
 
-        # ── 우측 패널 조립 ──
-        right = W.VBox([
+        # ── 우측 상단 패널: 에디터 + 추천 + 액션 ──
+        # 결과 Output 은 따로 빼서 셀 전체 너비를 차지하게 만든다.
+        right_top = W.VBox([
             W.HTML(
                 '<div style="padding:5px 10px;background:#eef0f3;'
                 'border:1px solid #d8dde1;border-radius:4px 4px 0 0;'
@@ -805,15 +806,28 @@ class SQLRunnerCM:
             ),
             self._suggest_box,
             actions,
-            W.HTML(
-                '<div style="padding:3px 10px;background:#f7f8fa;'
-                'border:1px solid #d8dde1;border-top:0;border-bottom:0;'
-                'font-size:11px;color:#6c757d">📤 실행 결과</div>'
-            ),
-            self._output,
         ], layout=W.Layout(flex="1", min_width="0"))
 
-        layout = W.HBox([tree, right], layout=W.Layout(width="100%"))
+        # 상단 행: 좌측 트리 + 우측 (에디터/추천/액션)
+        top_row = W.HBox([tree, right_top], layout=W.Layout(width="100%"))
+
+        # 하단 결과 영역: 셀 전체 너비
+        result_section = W.VBox([
+            W.HTML(
+                '<div style="padding:3px 10px;margin-top:6px;'
+                'background:#eef0f3;border:1px solid #d8dde1;'
+                'border-radius:4px 4px 0 0;font-size:11px;'
+                'color:#1f2329"><b>📤 실행 결과</b>  '
+                '<span style="color:#6c757d">'
+                '· runner.last_result / runner.history 로 후속 분석 가능'
+                '</span></div>'
+            ),
+            self._output,
+        ], layout=W.Layout(width="100%"))
+
+        # 최상위: 상단 행 + 결과 (전체 너비)
+        layout = W.VBox([top_row, result_section],
+                        layout=W.Layout(width="100%"))
 
         # 1. CSS + JS 번들 1회 주입
         display(HTML(self._cm_bundle_html()))
@@ -829,17 +843,27 @@ class SQLRunnerCM:
         """CodeMirror CSS+JS 한 번에 inject. 노트북당 1회만 호출되어도
         충분 (각 인스턴스가 매번 호출해도 idempotent — 브라우저는 동일 함수
         선언을 무시 / 재선언하지만 동작 영향 없음)."""
-        # 컬럼 Button 좌정렬 + 모노스페이스 — NBSP 패딩이 깔끔하게 보이도록.
-        # ipywidgets 기본 Button 은 텍스트 중앙정렬이라 'name  TYPE' 한 줄
-        # 표시가 어색해짐. justify-content:flex-start 로 좌정렬.
+        # 컬럼 Button 좌정렬 + 모노스페이스. ipywidgets 기본 Button 은
+        # 텍스트 중앙정렬이라 'name  TYPE' 한 줄 표시가 어색해짐.
+        # justify-content:flex-start 로 좌정렬, NBSP 패딩이 깔끔하게.
+        # font-size 13px / line-height 1.4 / min-height 26px 로 설정해
+        # 글자가 너무 작거나 겹치지 않도록.
         col_btn_css = (
+            ".cm-col-btn{margin:0 !important;padding:0 !important}"
             ".cm-col-btn button.jupyter-button{"
             " justify-content:flex-start !important;"
             " text-align:left !important;"
-            " padding-left:8px !important;"
+            " padding:0 8px !important;"
             " font-family:'SF Mono',Menlo,Consolas,monospace !important;"
-            " font-size:11px !important;"
+            " font-size:13px !important;"
+            " line-height:1.4 !important;"
+            " min-height:26px !important;"
+            " height:26px !important;"
             " white-space:pre !important;"
+            " color:#1f2329 !important;"
+            "}"
+            ".cm-col-btn button.jupyter-button:hover{"
+            " background:#eef2f7 !important;"
             "}"
         )
         return (
