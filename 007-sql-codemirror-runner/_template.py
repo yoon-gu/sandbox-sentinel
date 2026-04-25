@@ -658,26 +658,42 @@ class SQLRunnerCM:
                         f'{escape(self.notes[tname])}</div>'
                     ))
 
+                # ── 컬럼: 한 줄에 하나, 'name  TYPE' 형식 + 호버 시 doc tooltip
                 col_btns: list = []
                 for c in cols:
-                    tooltip = c["name"]
-                    if c.get("type"):
-                        tooltip += f" : {c['type']}"
-                    if c.get("doc"):
-                        tooltip += f" — {c['doc']}"
+                    type_str = c.get("type", "") or ""
+                    doc_str = c.get("doc", "") or ""
+                    if type_str:
+                        # 1줄 표시: "id  INTEGER" — Button description.
+                        # ipywidgets Button 은 알파 수치 정렬이 없어 다중 공백
+                        # 이 collapse 될 수 있으므로 NBSP 로 패딩.
+                        NBSP = " "
+                        pad_target = 16   # name 영역 폭 (chars)
+                        padded = c["name"] + NBSP * max(2, pad_target - len(c["name"]))
+                        desc = padded + type_str
+                    else:
+                        desc = c["name"]
+                    tooltip_parts = [c["name"]]
+                    if type_str:
+                        tooltip_parts.append(f": {type_str}")
+                    if doc_str:
+                        tooltip_parts.append(f"— {doc_str}")
+                    tooltip = "  ".join(tooltip_parts)
                     cbtn = W.Button(
-                        description=c["name"],
+                        description=desc,
                         tooltip=tooltip,
-                        layout=W.Layout(margin="1px", width="auto",
-                                        height="22px"),
+                        layout=W.Layout(
+                            margin="0",
+                            width="218px", height="22px",
+                        ),
                     )
+                    cbtn.add_class("cm-col-btn")   # 좌정렬+모노 CSS 매치
                     cbtn.style.button_color = "#ffffff"
                     cbtn.on_click(self._make_inserter(c["name"]))
                     col_btns.append(cbtn)
-                tree_children.append(W.HBox(
+                tree_children.append(W.VBox(
                     col_btns,
-                    layout=W.Layout(flex_flow="row wrap",
-                                    padding="0 8px 6px 14px"),
+                    layout=W.Layout(padding="0 8px 6px 14px"),
                 ))
 
         tree = W.VBox(
@@ -793,11 +809,25 @@ class SQLRunnerCM:
         """CodeMirror CSS+JS 한 번에 inject. 노트북당 1회만 호출되어도
         충분 (각 인스턴스가 매번 호출해도 idempotent — 브라우저는 동일 함수
         선언을 무시 / 재선언하지만 동작 영향 없음)."""
+        # 컬럼 Button 좌정렬 + 모노스페이스 — NBSP 패딩이 깔끔하게 보이도록.
+        # ipywidgets 기본 Button 은 텍스트 중앙정렬이라 'name  TYPE' 한 줄
+        # 표시가 어색해짐. justify-content:flex-start 로 좌정렬.
+        col_btn_css = (
+            ".cm-col-btn button.jupyter-button{"
+            " justify-content:flex-start !important;"
+            " text-align:left !important;"
+            " padding-left:8px !important;"
+            " font-family:'SF Mono',Menlo,Consolas,monospace !important;"
+            " font-size:11px !important;"
+            " white-space:pre !important;"
+            "}"
+        )
         return (
             "<style>"
             + _CM_CSS + "\n" + _CM_HINT_CSS + "\n" + _CM_THEME_CSS
             + "\n.cm-mount .CodeMirror{height:auto;min-height:220px;"
             "font-family:'SF Mono',Menlo,Consolas,monospace;font-size:13px}"
+            + "\n" + col_btn_css
             + "</style>"
             + "<script>"
             + _CM_JS + "\n" + _CM_SQL_JS + "\n" + _CM_HINT_JS
