@@ -64,6 +64,7 @@ Claude Code는 다음 경로의 Skill만 자동 인식합니다.
 | 002 | [sentinel-track](002-sentinel-track/) | wandb 개념 참고 | 폐쇄망용 wandb 호환 실험 트래커 (HTML 대시보드 반출) |
 | 003 | [langgraph-chat-repl](003-langgraph-chat-repl/) | langgraph + textual (MIT) | 터미널 풀스크린 LangGraph 챗봇 REPL (Claude Code 스타일, 인라인 HITL · 슬래시 팔레트) |
 | 004 | [langgraph-prompt-toolkit-repl](004-langgraph-prompt-toolkit-repl/) | langgraph + prompt_toolkit (MIT · BSD) | 003 의 prompt_toolkit 판 — textual 없이도 동작 (ipython 전이 의존) |
+| 005 | [sql-editor-notebook](005-sql-editor-notebook/) | (오리지널 · MIT) | Jupyter 셀에서 동작하는 SQL 편집기 — 좌 entity 트리 + 우 쿼리 입력 + 컨텍스트 자동완성 |
 
 각 폴더의 `README.md`에 설치·사용법·제약이 한글로 정리되어 있습니다.
 
