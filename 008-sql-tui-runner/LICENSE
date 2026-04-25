@@ -1,0 +1,34 @@
+이 LICENSE 는 사용한 Textual TUI 프레임워크의 라이선스 (MIT) 명시본입니다.
+sandbox-sentinel/008-sql-tui-runner/sql_tui.py 는 textual 6.11.0 을 import
+하여 동작하므로 본 라이선스가 textual 사용 부분에 적용됩니다.
+
+(원문은 https://github.com/Textualize/textual/blob/main/LICENSE)
+
+----------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2021-2024 Will McGugan and other Textualize contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+----------------------------------------------------------------------
+
+이 리포의 sql_tui.py wrapper 자체 (sandbox-sentinel 오리지널 부분) 는
+별도 라이선스 없이 사내에서 자유롭게 활용 가능합니다.
