@@ -379,6 +379,40 @@ class SQLRunner:
         self._suggest_box = None
         self._output = None
 
+    # ----- 편의 생성자 (thread-safe sqlite 패턴 자동 적용) -----
+
+    @classmethod
+    def with_sqlite(cls, db_path: str) -> "SQLRunner":
+        """SQLite DB 경로 하나로 thread-safe 한 SQLRunner 를 즉시 구성.
+
+        ipywidgets 버튼 콜백은 Jupyter 커널의 comm/IO 스레드에서 실행되어
+        외부 셀에서 만든 sqlite3.Connection 과 thread 가 다를 수 있다 (그
+        경우 ProgrammingError: SQLite objects created in a thread can only
+        be used in that same thread). 이 헬퍼는 매 호출마다 새 connect 를
+        열고 닫아 thread 문제를 회피한다.
+
+        사용:
+            runner = SQLRunner.with_sqlite("./demo.db")
+            runner.show()
+
+        pandas 는 lazy import. 미설치면 ImportError 만 미루고 호출 시점에
+        명확히 안내.
+        """
+        def _run(sql: str) -> Any:
+            try:
+                import pandas as pd
+            except ImportError as e:  # pragma: no cover
+                raise RuntimeError(
+                    "with_sqlite 는 pandas 가 필요합니다. "
+                    "직접 on_execute 콜백을 작성하거나 pandas 설치 후 재시도."
+                ) from e
+            with sqlite3.connect(db_path) as conn:
+                return pd.read_sql(sql, conn)
+
+        runner = cls(on_execute=_run)
+        runner.from_sqlite(db_path)
+        return runner
+
     # ----- 스키마 등록 (005 와 동일 API) -----
 
     def add_table(self, name: str,

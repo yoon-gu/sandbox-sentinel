@@ -55,19 +55,50 @@
 
 ## 사용 예시
 
-### 빠른 시작 (SQLite + pandas)
+### 빠른 시작 (SQLite + pandas) — 편의 메서드
+
+```python
+from sql_runner import SQLRunner
+
+runner = SQLRunner.with_sqlite("./demo.db")    # ⭐ thread-safe 자동 처리
+runner.set_query("SELECT * FROM users LIMIT 10;")
+runner.show()
+```
+
+`with_sqlite()` 는 매 ▶ 실행 마다 새 connection 을 열고 닫아 ipywidgets 의
+스레드 이슈를 자동 회피합니다. (pandas 필요)
+
+### 직접 콜백 — 공유 connection 패턴
 
 ```python
 import sqlite3, pandas as pd
 from sql_runner import SQLRunner
 
-conn = sqlite3.connect("./demo.db")
+# ⚠️ ipywidgets 버튼 콜백은 다른 스레드에서 실행되므로 check_same_thread=False 필요
+conn = sqlite3.connect("./demo.db", check_same_thread=False)
 
 runner = SQLRunner(on_execute=lambda sql: pd.read_sql(sql, conn))
 runner.from_sqlite("./demo.db")
-runner.set_query("SELECT * FROM users LIMIT 10;")
-runner.show()   # Jupyter 셀에 위젯 렌더 → ▶ 실행 으로 결과 표시
+runner.show()
 ```
+
+또는 매 호출마다 connect (제일 안전):
+
+```python
+def run_sql(sql):
+    with sqlite3.connect("./demo.db") as conn:
+        return pd.read_sql(sql, conn)
+
+runner = SQLRunner(on_execute=run_sql)
+runner.from_sqlite("./demo.db")
+runner.show()
+```
+
+> ⚠️ **SQLite + ipywidgets threading**: ▶ 실행 콜백은 Jupyter 커널의 IO 스레드
+> 에서 발화되어 cell 의 메인 실행 스레드와 다릅니다. 평소처럼 `sqlite3.connect(path)`
+> 한 connection 을 그대로 캡처하면 `ProgrammingError: SQLite objects created
+> in a thread can only be used in that same thread` 가 발생합니다. 위 셋
+> 패턴 중 하나 사용 권장 — 가장 간단한 건 `SQLRunner.with_sqlite(path)`.
 
 ### 직접 등록
 
