@@ -238,8 +238,9 @@ trace_*.html
 # Claude worktrees (transient)
 .claude/worktrees/
 
-# 005/006 SQL editor 데모 산출물
+# 005/006/007 SQL editor 데모 산출물
 sql_editor_snapshot*.html
 sql_editor_demo*.html
 sql_runner_demo*.html
+sql_codemirror_demo*.html
 *.db
