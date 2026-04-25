@@ -234,3 +234,6 @@ $RECYCLE.BIN/
 
 # chat_ui() 의 [트레이스 저장 & 링크] 버튼이 생성하는 파일
 trace_*.html
+
+# Claude worktrees (transient)
+.claude/worktrees/
