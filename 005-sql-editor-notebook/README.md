@@ -126,7 +126,7 @@ pd.read_sql(sql, conn)
 ├── metadata.json
 ├── LICENSE                 # MIT (오리지널)
 └── examples/
-    └── basic_usage.py      # 데모 스키마 + HTML 파일로 저장 (브라우저 직접 열기)
+    └── demo.ipynb          # 노트북 데모
 ```
 
 ## 폐쇄망 친화 체크
