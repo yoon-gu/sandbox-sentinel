@@ -12,12 +12,16 @@
   "agent_version": "0.1.0",
   "dependencies_used": ["textual"],
   "optional_dependencies": {
-    "pandas": ">=1.3  # with_sqlite() / DataFrame 결과 자동 표 변환 시"
+    "pandas": ">=1.3  # with_sqlite() / DataFrame 결과 자동 표 변환 시",
+    "tree-sitter": "fast 16.x  # 에디터 inline SQL 색 (없으면 plain text fallback, 기능 동작에 지장 없음)",
+    "tree-sitter-sql": ">=0.3   # SQL 그래머 (textual 이 import_module('tree_sitter_sql') 로 동적 로드)"
   },
   "stack_notes": [
     "textual 6.11.0 은 사내 스택에서 --no-deps 옵션으로 설치 (rich/markdown_it_py/platformdirs 등은 사내 미러에서 함께 반입)",
     "Python 3.11 (스택 핀)",
-    "TextArea 의 SQL syntax highlight 는 textual 이 native bundled grammar 를 사용 (tree-sitter SQL 그래머 포함). 별도 패키지 불필요."
+    "TextArea 의 SQL syntax highlight 는 별도 tree-sitter + tree-sitter-sql 패키지 필요. textual 자체는 그래머 binary 를 포함하지 않고 import_module('tree_sitter_sql') 로 동적 로드.",
+    "tree-sitter 가 설치되어 있지만 tree-sitter-sql 이 없으면 LanguageDoesNotExist 발생 — sql_tui.py 는 try/except 로 plain text fallback (오류 없이 단순히 색이 안 입혀짐).",
+    "tree-sitter 자체가 없으면 fallback 없이 plain text 로 동작 (Textual 이 스스로 처리)."
   ],
   "extracted_features": [
     "Textual App: Tree(좌) + TextArea(에디터) + Static(추천 라인) + DataTable(결과)",
@@ -25,7 +29,7 @@
     "Ctrl+R / F5 — ▶ 실행 → on_execute(sql) 콜백 호출 → 결과를 DataTable 에 표 변환",
     "Ctrl+Space — 자동완성 popup (ModalScreen + OptionList, 컨텍스트 인식)",
     "컨텍스트 인식 정책 (005~007 과 동일): FROM→테이블, SELECT→컬럼, table.→qualifier, fallback 으로 KEYWORDS/FUNCTIONS 항상 후보",
-    "Tree 노드 선택 → 에디터 커서 위치에 인서트 (마지막 부분 단어 prefix 매치 시 치환)",
+    "Tree 테이블 노드 선택 → 에디터를 'SELECT * FROM <table>;' 로 교체 (빠른 시작), 컬럼 노드 선택 → 컬럼명을 현재 커서 위치에 인서트",
     "DataFrame 자동 표 변환, list[dict] / list[tuple] 도 지원",
     "외부 네트워크/CDN/바이너리 영속화 0 — single-file .py 반입"
   ],

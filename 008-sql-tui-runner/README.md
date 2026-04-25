@@ -57,7 +57,7 @@
 | **Ctrl+L** | 에디터 비우기 |
 | **F1** | 도움말 |
 | **Ctrl+Q** | 종료 |
-| 트리 ↑↓ Enter | 컬럼/테이블 → 에디터 커서 위치에 인서트 |
+| 트리 ↑↓ Enter | **테이블** 노드 → 에디터를 `SELECT * FROM <table>;` 로 교체 (빠른 시작)<br>**컬럼** 노드 → 컬럼명을 현재 커서 위치에 인서트 |
 
 ### 인라인 추천 리스트 (편집 중 자동 갱신)
 
@@ -74,10 +74,21 @@
 |---|---|---|
 | 필수 | `textual>=6.11.0` | TUI 프레임워크 |
 | 전이 | `rich`, `pygments`, `markdown_it_py`, `platformdirs` | textual 의 transitive 의존 |
+| **SQL 색** | `tree-sitter`, `tree-sitter-sql` | 에디터 자체 inline syntax highlight ([상세](#syntax-highlight-요구-사항)) |
 | 선택 | `pandas` | `with_sqlite()` / DataFrame 결과 자동 표 변환 시 |
 | 선택 | `sqlite3` (stdlib) | `from_sqlite` / `with_sqlite` |
 
-> **폐쇄망 스택 정책**: textual 6.11.0 은 `--no-deps` 옵션으로 설치되어야 함 (`environment-adapter` Skill 의 `default.yaml` 참고). 실제 실행에는 `rich` 등이 필요하므로 사내 미러에서 함께 반입.
+### Syntax highlight 요구 사항
+
+Textual 6.x 의 TextArea 는 `language="sql"` 인자만으로는 highlight 가 동작하지 않습니다 — 실제 그래머 패키지가 별도로 필요합니다.
+
+```bash
+pip install tree-sitter tree-sitter-sql
+```
+
+설치되면 `_set_document` 시점에 `SyntaxAwareDocument` 가 생성되어 키워드 / 문자열 / 함수 / 숫자가 monokai 색으로 입혀집니다. 미설치 시 `LanguageDoesNotExist` 가 발생할 수 있어 sql_tui.py 는 try/except 로 plain text fallback 합니다 (오류 없이 단순히 색이 안 입혀짐).
+
+> **폐쇄망 스택 정책**: textual 6.11.0 은 `--no-deps` 옵션으로 설치되어야 함 (`environment-adapter` Skill 의 `default.yaml` 참고). 실제 실행에는 `rich` 등이 필요하므로 사내 미러에서 함께 반입. tree-sitter 패키지도 사내 미러에 등록되어 있는 경우에만 syntax highlight 활성화.
 
 ## 사용 예시
 
