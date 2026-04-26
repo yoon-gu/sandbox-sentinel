@@ -100,7 +100,12 @@ _ANCHORS = {
 
 
 def detect_context(text: str) -> str:
-    """직전 anchor 키워드로 추천 종류를 결정 (005 와 동일 정책)."""
+    """직전 anchor 키워드로 추천 종류를 결정.
+
+    weak anchor (`AS` / `WITH` / `VALUES`) 는 콤마를 지나친 뒤에는
+    건너뛰고 더 깊은 clause anchor(SELECT 등)를 찾는다. 그래야
+    `SELECT col AS alias, |` 처럼 새 항목 시작 위치에서 컬럼 추천이 뜸.
+    """
     s = re.sub(r"--[^\n]*", " ", text)
     s = re.sub(r"/\*.*?\*/", " ", s, flags=re.DOTALL)
     s = re.sub(r"'[^']*'", " ", s)
@@ -108,11 +113,20 @@ def detect_context(text: str) -> str:
     tokens = s.split()
     if not tokens:
         return "start"
+    WEAK = {"AS", "WITH", "VALUES"}
+    seen_comma = False
     last = None
     last_idx = -1
     for i in range(len(tokens) - 1, -1, -1):
-        tu = tokens[i].upper()
+        tok = tokens[i]
+        if "," in tok:
+            seen_comma = True
+        tu = tok.upper()
         if tu in _ANCHORS:
+            # weak anchor 는 콤마를 지나친 뒤에는 건너뜀 (그 AS 는 이전
+            # 항목에 묶인 것이고, 사용자는 새 항목을 시작 중)
+            if tu in WEAK and seen_comma:
+                continue
             last = tu
             last_idx = i
             break
@@ -455,10 +469,20 @@ _BOOTSTRAP_JS_TPL = r"""
       .replace(/"[^"]*"/g," ");
     var tokens = s.split(/\s+/).filter(function(t){{ return t.length > 0; }});
     if(tokens.length === 0) return "start";
+    // weak anchor (AS/WITH/VALUES) 는 콤마를 지나친 뒤에는 건너뜀 — Python
+    // detect_context 와 동일 정책. 'SELECT col AS al, |' 같이 콤마로
+    // 새 항목 시작 위치에서 컬럼 추천이 뜨도록.
+    var WEAK = {{ "AS":1, "WITH":1, "VALUES":1 }};
+    var seenComma = false;
     var last = null, lastIdx = -1;
     for(var i = tokens.length-1; i >= 0; i--){{
-      var tu = tokens[i].toUpperCase();
-      if(ANCHORS[tu]){{ last = tu; lastIdx = i; break; }}
+      var tok = tokens[i];
+      if(tok.indexOf(",") >= 0) seenComma = true;
+      var tu = tok.toUpperCase();
+      if(ANCHORS[tu]){{
+        if(WEAK[tu] && seenComma) continue;
+        last = tu; lastIdx = i; break;
+      }}
     }}
     if(last === null) return "start";
     if((last === "GROUP" || last === "ORDER") &&
