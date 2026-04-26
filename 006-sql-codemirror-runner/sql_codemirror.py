@@ -644,8 +644,17 @@ def extract_aliases(text: str, tables: Mapping[str, list]) -> dict:
     return aliases
 
 
-def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
-    """현재 컨텍스트에 맞는 추천 후보 리스트 (텍스트 끝 기준)."""
+def get_suggestions(text: str, tables: Mapping[str, list],
+                     full_text: Optional[str] = None) -> list:
+    """현재 컨텍스트에 맞는 추천 후보 리스트 (텍스트 끝 기준).
+
+    Args:
+        text: cursor 까지의 텍스트 (컨텍스트 감지에 사용).
+        tables: 스키마 매핑.
+        full_text: 전체 SQL 문서. alias 추출에 사용. None 이면 ``text``.
+            SELECT 절(FROM 보다 앞)에서도 'o.' / 'e.' 가 동작하려면
+            반드시 전체 텍스트를 넘겨야 함.
+    """
     ctx = detect_context(text)
     m = re.search(r"([\w_.]+)$", text)
     last_word = m.group(1) if m else ""
@@ -656,8 +665,9 @@ def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
         dot_idx = last_word.index(".")
         qual = last_word[:dot_idx]
         col_prefix = last_word[dot_idx + 1:].lower()
-        # 본명/AS alias 모두 매핑 — 'orders.' / 'o.' 둘 다 동작
-        aliases = extract_aliases(text, tables)
+        # 본명/AS alias 모두 매핑. alias 추출은 전체 문서 기준 — SELECT 절
+        # 처럼 FROM 보다 앞에 있을 때도 뒤쪽 FROM/JOIN 을 보고 매핑해야 함.
+        aliases = extract_aliases(full_text if full_text is not None else text, tables)
         real = aliases.get(qual)
         if real and real in tables:
             return [
@@ -1033,11 +1043,13 @@ _BOOTSTRAP_JS_TPL = r"""
     var ctx = detectContext(beforeAll);
 
     // table_or_alias. qualifier 우선 처리
+    // alias 추출은 cursor 까지가 아닌 **전체 문서** 를 스캔 — SELECT 절에서
+    // FROM 보다 앞 위치에 있을 때도 뒤쪽 'FROM x AS o' 가 인식되어야 함.
     var dot = word.indexOf(".");
     if(dot > 0){{
       var qual = word.substring(0, dot);
       var fp = word.substring(dot+1).toLowerCase();
-      var aliases = extractAliases(beforeAll);
+      var aliases = extractAliases(cm.getValue());
       var real = aliases[qual];
       if(real && SCHEMA[real]){{
         var list = SCHEMA[real]
@@ -1538,7 +1550,10 @@ class SQLRunnerCM:
             ),
         ]
 
-        sugs = get_suggestions(text, self.tables)
+        # alias 추출은 전체 SQL 텍스트 (_textarea) 를 기준으로 — cursor 가
+        # SELECT 절에 있어도 뒤쪽 FROM/JOIN 의 AS alias 가 잡혀야 함.
+        full_text = self._textarea.value if self._textarea is not None else text
+        sugs = get_suggestions(text, self.tables, full_text=full_text)
         if not sugs:
             children.append(W.HTML(
                 '<span style="color:#888;font-size:11px;font-style:italic;'
