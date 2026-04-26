@@ -353,15 +353,45 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
     from rich.text import Text
 
     # ── TextArea 는 그대로 (Tab 은 indent 기본 동작) ──
-    # Ctrl+Space 만 popup trigger 로 추가. Tab 은 textarea 기본 indent.
+    # Ctrl+Space 만 popup trigger 로 추가. Shift+Tab 은 dedent.
     class _SqlTextArea(TextArea):
         BINDINGS = [
             Binding("ctrl+space", "trigger_popup",
                     description="자동완성", show=False, priority=True),
+            Binding("shift+tab", "dedent",
+                    description="들여쓰기 해제", show=False, priority=True),
         ]
 
         def action_trigger_popup(self) -> None:
             self.app.action_show_popup()
+
+        def action_dedent(self) -> None:
+            """현재 줄(또는 선택 범위 줄들) 의 앞 indent 제거.
+
+            Textual TextArea 기본에는 dedent 가 없어 직접 구현.
+            line[0:N] 의 공백/탭을 indent_width 만큼 제거.
+            """
+            sel = self.selection
+            start_line = min(sel.start[0], sel.end[0])
+            end_line = max(sel.start[0], sel.end[0])
+            width = self.indent_width
+            for line_idx in range(start_line, end_line + 1):
+                try:
+                    line = self.document.get_line(line_idx)
+                except Exception:
+                    continue
+                # 앞쪽 공백/탭 N자 (최대 indent_width)
+                n = 0
+                while (n < min(width, len(line))
+                       and line[n] in (" ", "\t")):
+                    n += 1
+                if n > 0:
+                    self.replace(
+                        "",
+                        start=(line_idx, 0),
+                        end=(line_idx, n),
+                        maintain_selection_offset=True,
+                    )
 
     # ── 커서 근처에 떠 있는 floating 자동완성 popup ──
     # 에디터 입력에 따라 자동 표시. Ctrl+Space 로도 수동 호출.
@@ -469,7 +499,9 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
         """
 
         BINDINGS = [
-            Binding("ctrl+r,f5",  "run",          "▶ 실행",   priority=True),
+            # Ctrl+Enter 는 터미널이 보통 Ctrl+J 로 전송 (Unix 관습) — 둘 다 받음
+            Binding("ctrl+r,f5,ctrl+enter,ctrl+j",  "run",
+                    "▶ 실행", priority=True),
             # Tab 은 에디터 indent 그대로 (override 안 함).
             # 자동완성 popup 은 입력 시 자동, 또는 Ctrl+Space 로 수동 트리거.
             Binding("ctrl+space", "show_popup",   "자동완성", priority=True),
