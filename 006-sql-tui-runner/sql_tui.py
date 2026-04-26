@@ -20,7 +20,7 @@ SQL Runner TUI — Textual 기반 single-file SQL 편집기 + 실행 위젯.
      · ↑↓     : 추천 후보 사이 이동
      · Enter  : 선택 → 에디터 커서 위치에 인서트 + 에디터 복귀
      · Esc/Tab: 에디터로 복귀 (선택 없이)
-  4) Ctrl+R / F5 → on_execute(sql) 콜백 호출, DataTable 에 결과 표시
+  4) Ctrl+R / F5 / Ctrl+E → on_execute(sql) 콜백 호출, DataTable 에 결과 표시
   5) 외부 네트워크 / CDN / 바이너리 영속화 0 — 단일 .py 반입
 
 사용 예시
@@ -39,13 +39,18 @@ SQL Runner TUI — Textual 기반 single-file SQL 편집기 + 실행 위젯.
     runner.from_sqlite("./demo.db")
     runner.run()
 
-키 바인딩
+키 바인딩 (모두 노트북 터미널 / xterm.js 호환)
 --------
-    Ctrl+R / F5     ▶ 실행
-    Tab             에디터 ↔ 인라인 추천 리스트 포커스 이동
+    Ctrl+R / F5 / Ctrl+E  ▶ 실행
+    Ctrl+N          자동완성 popup (커서 근처)
+    Ctrl+K          💬 채팅 popup (🚧 미완성 — LLM 연동 hook 만 제공)
+    Ctrl+/          현재 줄 / 선택 범위 SQL 주석 (--) 토글
+    Tab / Shift+Tab 들여쓰기 / 해제
     Ctrl+T          트리 포커스
-    Ctrl+E          에디터 포커스
+    Ctrl+B          에디터 포커스
     Ctrl+L          에디터 비우기
+    Ctrl+S          ⬇ CSV 저장
+    F4              ⬇ Excel 저장
     F1              도움말
     Ctrl+Q / Ctrl+C 종료
 """
@@ -333,10 +338,51 @@ def _normalize_column(c: ColumnSpec) -> dict:
     raise TypeError(f"알 수 없는 컬럼 스펙 형식: {type(c).__name__}")
 
 
+def _extract_sql_block(text: str) -> str:
+    """LLM 응답에서 ```sql ... ``` (또는 ``` ... ```) 블록 안 SQL 만 추출.
+
+    블록이 없으면 응답 전체를 그대로 strip 해서 반환.
+    여러 개면 첫 블록 사용 (text2sql 답변 패턴 가정).
+    """
+    m = re.search(r"```(?:sql)?\s*\n(.*?)\n```", text,
+                  re.DOTALL | re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    return text.strip()
+
+
+def _split_message(text: str) -> list[tuple]:
+    """LLM 응답을 (kind, lang, content) 세그먼트 리스트로 분해.
+
+    kind = "prose" | "code". prose 는 markdown 으로, code 는 _CodeBlock
+    widget 으로 따로 렌더해 코드블록마다 복사 버튼을 붙일 수 있게 한다.
+    """
+    pattern = re.compile(r"```([A-Za-z0-9_+-]*)\s*\n(.*?)\n```",
+                         re.DOTALL)
+    segments: list[tuple] = []
+    last = 0
+    for m in pattern.finditer(text):
+        if m.start() > last:
+            prose = text[last:m.start()].strip("\n")
+            if prose.strip():
+                segments.append(("prose", "", prose))
+        lang = (m.group(1) or "").lower() or "text"
+        segments.append(("code", lang, m.group(2)))
+        last = m.end()
+    if last < len(text):
+        prose = text[last:].strip("\n")
+        if prose.strip():
+            segments.append(("prose", "", prose))
+    if not segments and text.strip():
+        segments.append(("prose", "", text))
+    return segments
+
+
 # ===== Textual TUI =====
 # (textual 은 lazy import — 헤드리스 단위 검증에서도 모듈 import 자체는 가능)
 
-def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
+def _build_app(*, on_execute, tables, notes, initial_query,
+               app_state=None, on_chat=None):
     """SQLRunnerTUI.run() 시점에 textual 을 import 하고 App 클래스를 동적 구성.
 
     이 패턴은 basic_usage.py 처럼 textual 을 띄우지 않는 단위
@@ -344,26 +390,77 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
     """
     from textual.app import App, ComposeResult
     from textual.binding import Binding
-    from textual.containers import Horizontal, Vertical
+    from textual.containers import Horizontal, Vertical, VerticalScroll
     from textual.screen import ModalScreen
     from textual.widgets import (
         Header, Footer, Tree, TextArea, Static, DataTable, OptionList,
+        Input,
     )
     from textual.widgets.option_list import Option
     from rich.text import Text
 
     # ── TextArea 는 그대로 (Tab 은 indent 기본 동작) ──
-    # Ctrl+Space 만 popup trigger 로 추가. Shift+Tab 은 dedent.
+    # Ctrl+N 으로 popup trigger (Ctrl+Space 는 노트북 터미널 / xterm.js 에서
+    # NUL 바이트로 필터링되어 동작 X). Shift+Tab 은 dedent. Ctrl+/ 는 SQL
+    # 주석 토글.
     class _SqlTextArea(TextArea):
         BINDINGS = [
-            Binding("ctrl+space", "trigger_popup",
+            Binding("ctrl+n", "trigger_popup",
                     description="자동완성", show=False, priority=True),
             Binding("shift+tab", "dedent",
                     description="들여쓰기 해제", show=False, priority=True),
+            Binding("ctrl+slash", "toggle_comment",
+                    description="주석 토글", show=False, priority=True),
         ]
 
         def action_trigger_popup(self) -> None:
             self.app.action_show_popup()
+
+        def action_toggle_comment(self) -> None:
+            """SQL 라인 주석 (`-- `) 토글.
+
+            선택 범위 (또는 현재 줄) 의 모든 비어있지 않은 줄이 이미 `--` 로
+            시작하면 uncomment, 하나라도 아니면 모든 줄을 comment.
+            주석 마커는 leading indent 다음에 삽입 (VS Code / IntelliJ 관습).
+            """
+            sel = self.selection
+            start_row = min(sel.start[0], sel.end[0])
+            end_row = max(sel.start[0], sel.end[0])
+
+            lines: list[str] = []
+            for row in range(start_row, end_row + 1):
+                try:
+                    lines.append(self.document.get_line(row))
+                except Exception:
+                    lines.append("")
+
+            non_empty = [l for l in lines if l.strip()]
+            all_commented = (
+                bool(non_empty) and
+                all(l.lstrip().startswith("--") for l in non_empty)
+            )
+
+            for offset, line in enumerate(lines):
+                if not line.strip():
+                    continue
+                row = start_row + offset
+                stripped = line.lstrip()
+                indent = line[:len(line) - len(stripped)]
+                if all_commented:
+                    if stripped.startswith("-- "):
+                        new_line = indent + stripped[3:]
+                    elif stripped.startswith("--"):
+                        new_line = indent + stripped[2:]
+                    else:
+                        continue
+                else:
+                    new_line = indent + "-- " + stripped
+                self.replace(
+                    new_line,
+                    start=(row, 0),
+                    end=(row, len(line)),
+                    maintain_selection_offset=True,
+                )
 
         def action_dedent(self) -> None:
             """현재 줄(또는 선택 범위 줄들) 의 앞 indent 제거.
@@ -394,7 +491,7 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
                     )
 
     # ── 커서 근처에 떠 있는 floating 자동완성 popup ──
-    # 에디터 입력에 따라 자동 표시. Ctrl+Space 로도 수동 호출.
+    # 에디터 입력에 따라 자동 표시. Ctrl+N 으로도 수동 호출.
     # Tab/Enter 로 선택 · Esc/Tab 으로 닫기. 글자 입력 시 에디터로 forwarding.
     class _CursorPopup(OptionList):
         DEFAULT_CSS = """
@@ -444,6 +541,216 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
                 event.prevent_default()
                 event.stop()
 
+    # ── 코드 블록 widget — 헤더 (lang + 📋 복사) + Pygments 색 본문 ──
+    # 클릭 시 OSC 52 로 터미널 클립보드에 코드 복사. iTerm2 / Alacritty /
+    # kitty / WezTerm / Jupyter xterm.js 등에서 동작.
+    class _CodeBlock(Vertical):
+        DEFAULT_CSS = """
+        _CodeBlock {
+            height: auto;
+            border: round $accent;
+            margin-bottom: 1;
+            background: $panel;
+        }
+        _CodeBlock:hover { border: round $primary; }
+        _CodeBlock .cb-header {
+            height: 1; padding: 0 1;
+            background: $primary 30%;
+        }
+        _CodeBlock .cb-body { padding: 0 1; }
+        """
+
+        def __init__(self, code: str, lang: str = "text") -> None:
+            super().__init__()
+            self._code = code
+            self._lang = lang or "text"
+
+        def compose(self) -> ComposeResult:
+            yield Static(Text.from_markup(
+                f"[dim]{self._lang}[/]  "
+                f"[bold cyan]📋 복사[/] [dim](클릭)[/]"
+            ), classes="cb-header")
+            from rich.syntax import Syntax
+            try:
+                body = Syntax(
+                    self._code, self._lang, theme="monokai",
+                    line_numbers=False, word_wrap=True,
+                    background_color="default",
+                )
+            except Exception:
+                body = self._code
+            yield Static(body, classes="cb-body")
+
+        def on_click(self) -> None:
+            try:
+                self.app.copy_to_clipboard(self._code)
+                preview = self._code.replace("\n", " ")[:40]
+                self.app.notify(
+                    f"✓ 클립보드에 복사: {preview}…",
+                    severity="information", timeout=3,
+                )
+            except Exception as e:
+                self.app.notify(
+                    f"❌ 복사 실패: {type(e).__name__}: {e}",
+                    severity="error",
+                )
+
+    # ── 채팅 모달 (Ctrl+K) ──
+    # LLM 연동 hook — SQLRunnerTUI(on_chat=fn) 으로 콜백 주입.
+    # fn(prompt: str) -> str  형태. None 이면 mock fallback.
+    # 응답은 **Markdown 으로 렌더** — 코드 블록은 별도 _CodeBlock widget 으로
+    # mount 되어 클릭 또는 Ctrl+Y 로 클립보드에 복사 가능.
+    # Esc/Ctrl+C 로 닫음. Ctrl+I 로 마지막 응답의 첫 SQL 을 에디터에 인서트.
+    class _ChatScreen(ModalScreen[Optional[str]]):
+        DEFAULT_CSS = """
+        _ChatScreen { align: center middle; }
+        _ChatScreen > Vertical {
+            width: 95; height: 80%; padding: 1 2;
+            border: thick $primary; background: $surface;
+        }
+        _ChatScreen #chat-header {
+            color: $text-muted; height: 3; padding: 0 1;
+        }
+        _ChatScreen #chat-log {
+            height: 1fr; border: round $accent; padding: 0 1;
+            margin-bottom: 1;
+        }
+        _ChatScreen .msg-prompt {
+            color: $primary; padding: 0 1; margin-top: 1;
+        }
+        _ChatScreen .msg-prose {
+            padding: 0 1; height: auto;
+        }
+        _ChatScreen Input { dock: bottom; }
+        """
+        BINDINGS = [
+            Binding("escape", "cancel", "닫기"),
+            Binding("ctrl+i", "insert_to_editor", "에디터에 인서트"),
+            Binding("ctrl+y", "copy_last_sql", "복사",
+                    priority=True),
+        ]
+
+        def __init__(self, on_chat=None,
+                     history: Optional[list] = None) -> None:
+            super().__init__()
+            self._on_chat = on_chat
+            # 외부 list 를 그대로 받아 mutate — App 종료 후에도 보존
+            self._history = history if history is not None else []
+            self._last_response = ""
+
+        def compose(self) -> ComposeResult:
+            with Vertical():
+                yield Static(Text.from_markup(
+                    "[b]💬 채팅 (Ctrl+K)[/] "
+                    "[bold red]🚧 미완성 (experimental)[/]\n"
+                    "[dim]· Enter 전송 · Esc 닫기 · "
+                    "코드블록 클릭/Ctrl+Y 복사 · Ctrl+I 인서트[/]\n"
+                    "[dim yellow]※ LLM 연동 hook (on_chat=fn) 만 제공. "
+                    "history/streaming/멀티턴 컨텍스트는 아직 미구현.[/]"
+                ), id="chat-header")
+                yield VerticalScroll(id="chat-log")
+                yield Input(
+                    placeholder="LLM 에 질문 (예: '어제 가입한 사용자 SQL') · Enter 전송",
+                    id="chat-input",
+                )
+
+        def _mount_response(self, response: str) -> None:
+            """LLM 응답을 prose / code 세그먼트로 분해해 widget mount.
+
+            prose 는 Static(Markdown(...)) 로, code 는 _CodeBlock 으로
+            mount 해 코드블록마다 클릭 복사 가능.
+            """
+            from rich.markdown import Markdown
+            log = self.query_one("#chat-log", VerticalScroll)
+            for kind, lang, content in _split_message(response):
+                if kind == "code":
+                    log.mount(_CodeBlock(content, lang))
+                else:
+                    try:
+                        rendered = Markdown(content,
+                                            code_theme="monokai",
+                                            inline_code_lexer="text")
+                    except Exception:
+                        rendered = content
+                    log.mount(Static(rendered, classes="msg-prose"))
+
+        def _mount_prompt(self, prompt: str) -> None:
+            log = self.query_one("#chat-log", VerticalScroll)
+            log.mount(Static(Text.from_markup(
+                f"[b]>[/] {prompt}"
+            ), classes="msg-prompt"))
+
+        def on_mount(self) -> None:
+            log = self.query_one("#chat-log", VerticalScroll)
+            if self._history:
+                for entry in self._history:
+                    self._mount_prompt(entry["prompt"])
+                    self._mount_response(entry["response"])
+                    self._last_response = entry["response"]
+                self.call_after_refresh(
+                    lambda: log.scroll_end(animate=False))
+            else:
+                log.mount(Static(Text.from_markup(
+                    "[dim]LLM 콜백을 SQLRunnerTUI(on_chat=fn) 으로 주입하면 "
+                    "사내 LLM / text2sql / 검색 등을 연동 가능.\n"
+                    "응답은 markdown 으로 렌더되며 코드블록은 syntax "
+                    "highlight + 클릭 시 클립보드 복사 (또는 Ctrl+Y).[/]"
+                ), classes="msg-prose"))
+            self.query_one("#chat-input", Input).focus()
+
+        def on_input_submitted(self, event: "Input.Submitted") -> None:
+            prompt = event.value.strip()
+            if not prompt:
+                return
+            inp = self.query_one("#chat-input", Input)
+            self._mount_prompt(prompt)
+            try:
+                if self._on_chat is None:
+                    response = (
+                        "**(LLM 미연결 — echo)**\n\n"
+                        f"입력: `{prompt}`\n\n"
+                        "실제 LLM 을 붙이려면 "
+                        "`SQLRunnerTUI(on_chat=lambda p: my_llm(p))` "
+                        "처럼 콜백 주입."
+                    )
+                else:
+                    response = str(self._on_chat(prompt))
+            except Exception as e:
+                response = f"❌ **{type(e).__name__}**: {e}"
+            self._mount_response(response)
+            self._last_response = response
+            self._history.append({"prompt": prompt, "response": response})
+            inp.value = ""
+            log = self.query_one("#chat-log", VerticalScroll)
+            self.call_after_refresh(
+                lambda: log.scroll_end(animate=False))
+
+        def action_cancel(self) -> None:
+            self.dismiss(None)
+
+        def action_insert_to_editor(self) -> None:
+            self.dismiss(self._last_response)
+
+        def action_copy_last_sql(self) -> None:
+            """Ctrl+Y — 마지막 응답의 첫 SQL 블록을 클립보드에 복사."""
+            if not self._last_response:
+                self.app.notify("⚠ 복사할 응답이 없습니다.",
+                                severity="warning")
+                return
+            sql = _extract_sql_block(self._last_response)
+            try:
+                self.app.copy_to_clipboard(sql)
+                preview = sql.replace("\n", " ")[:40]
+                self.app.notify(
+                    f"✓ 클립보드에 복사: {preview}…",
+                    severity="information", timeout=3,
+                )
+            except Exception as e:
+                self.app.notify(
+                    f"❌ 복사 실패: {type(e).__name__}: {e}",
+                    severity="error",
+                )
+
     # ── 도움말 모달 ──
     class _HelpScreen(ModalScreen[None]):
         BINDINGS = [Binding("escape,q,f1", "dismiss", "Close")]
@@ -458,12 +765,13 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
         def compose(self) -> ComposeResult:
             with Vertical():
                 yield Static(Text.from_markup(
-                    "[b]에디터 단축키[/]\n\n"
+                    "[b]에디터 단축키[/]  [dim](모두 xterm.js / 노트북 터미널 호환)[/]\n\n"
                     "  [yellow]Tab[/]              들여쓰기 (4 spaces)\n"
                     "  [yellow]Shift+Tab[/]        들여쓰기 해제 (dedent)\n"
-                    "  [yellow]Ctrl+Space[/]       자동완성 popup (커서 근처)\n"
-                    "  [yellow]Ctrl+R/F5/Ctrl+Enter[/]  ▶ 실행\n\n"
-                    "[b]자동완성 popup (Ctrl+Space)[/]\n\n"
+                    "  [yellow]Ctrl+/[/]           현재 줄 / 선택 범위 주석 (`--`) 토글\n"
+                    "  [yellow]Ctrl+N[/]           자동완성 popup (커서 근처)\n"
+                    "  [yellow]Ctrl+R / F5 / Ctrl+E[/]  ▶ 실행\n\n"
+                    "[b]자동완성 popup (Ctrl+N)[/]\n\n"
                     "  • 커서 한 줄 아래에 floating 으로 등장\n"
                     "  • [yellow]↑↓[/]    후보 이동\n"
                     "  • [yellow]Tab/Enter[/]  선택 → 인서트 + 닫힘\n"
@@ -471,11 +779,16 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
                     "  • popup 떠 있는 동안 글자 입력 → 에디터로 forwarding +\n"
                     "    popup 갱신 (filter as you type)\n\n"
                     "[b]앱 단축키[/]\n\n"
+                    "  [yellow]Ctrl+K[/]   💬 채팅 popup [bold red](🚧 미완성)[/]\n"
+                    "             · 현재는 LLM 연동 hook (`on_chat=fn`) 만 제공.\n"
+                    "             · 코드블록 클릭 → 클립보드 복사\n"
+                    "             · Ctrl+Y → 마지막 SQL 복사\n"
+                    "             · Ctrl+I → 응답을 에디터에 인서트\n"
                     "  [yellow]Ctrl+T[/]   트리 포커스 (테이블/컬럼 선택)\n"
-                    "  [yellow]Ctrl+E[/]   에디터 포커스\n"
+                    "  [yellow]Ctrl+B[/]   에디터 포커스 (Back to editor)\n"
                     "  [yellow]Ctrl+L[/]   에디터 비우기\n"
                     "  [yellow]Ctrl+S[/]   ⬇ CSV 저장 (마지막 결과)\n"
-                    "  [yellow]Ctrl+X[/]   ⬇ Excel 저장 (마지막 결과)\n"
+                    "  [yellow]F4[/]       ⬇ Excel 저장 (마지막 결과)\n"
                     "  [yellow]F1[/]       이 도움말\n"
                     "  [yellow]Ctrl+Q[/]   종료\n\n"
                     "[b]결과 DataTable 스크롤[/] (포커스 후)\n\n"
@@ -509,25 +822,27 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
         """
 
         BINDINGS = [
-            # Ctrl+Enter 는 터미널이 보통 Ctrl+J 로 전송 (Unix 관습) — 둘 다 받음
-            Binding("ctrl+r,f5,ctrl+enter,ctrl+j",  "run",
+            # 모든 키는 xterm.js / 노트북 터미널 호환을 우선.
+            # Ctrl+Enter / Ctrl+Space 는 웹 터미널에서 NUL/newline 으로
+            # 변환되어 도달하지 않으므로 사용하지 않음.
+            Binding("ctrl+e,ctrl+r,f5",  "run",
                     "▶ 실행", priority=True),
-            # Tab 은 에디터 indent 그대로 (override 안 함).
-            # 자동완성 popup 은 입력 시 자동, 또는 Ctrl+Space 로 수동 트리거.
-            Binding("ctrl+space", "show_popup",   "자동완성", priority=True),
+            Binding("ctrl+n",     "show_popup",   "자동완성", priority=True),
+            Binding("ctrl+k",     "open_chat",    "💬 채팅(🚧)",  priority=True),
             Binding("ctrl+t",     "focus_tree",   "트리"),
-            Binding("ctrl+e",     "focus_editor", "에디터"),
+            Binding("ctrl+b",     "focus_editor", "에디터"),
             Binding("ctrl+l",     "clear",        "비우기"),
             Binding("ctrl+s",     "save_csv",     "⬇ CSV"),
-            Binding("ctrl+x",     "save_xlsx",    "⬇ Excel",  priority=True),
+            Binding("f4",         "save_xlsx",    "⬇ Excel",  priority=True),
             Binding("f1",         "help",         "도움말"),
             Binding("ctrl+q",     "quit",         "종료",     priority=True),
         ]
 
         def __init__(self, *, on_execute, tables, notes, initial_query,
-                     app_state):
+                     app_state, on_chat=None):
             super().__init__()
             self.on_execute = on_execute
+            self.on_chat = on_chat
             self._tables = tables
             self._notes = notes
             self._initial_query = initial_query
@@ -536,6 +851,9 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
             # history 가 들어있다. App 종료 후에도 사용자가 runner.last_result
             # 로 접근 가능하도록 외부 dict 를 그대로 mutate.
             self.app_state = app_state
+            # 채팅 history (App 세션 내에서 popup 재오픈에도 보존)
+            if "chat_history" not in self.app_state:
+                self.app_state["chat_history"] = []
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
@@ -560,7 +878,7 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
                         )
                     yield editor
                     yield Static("", id="ctx-label")
-                    yield Static("📤 결과 (Ctrl+R 또는 F5 로 실행)",
+                    yield Static("📤 결과 (Ctrl+E / Ctrl+R / F5 로 실행)",
                                  id="results-label")
                     yield DataTable(id="results", zebra_stripes=True)
             # 커서 근처에 뜨는 floating 자동완성 popup. 항상 mount 되어 있고
@@ -643,7 +961,7 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
                 before_cursor = full
             self._update_suggest(before_cursor, full_text=full)
 
-            # popup 자동 트리거 안 함 (Ctrl+Space 만으로 호출).
+            # popup 자동 트리거 안 함 (Ctrl+N 만으로 호출).
             # 단, 이미 popup 이 떠 있는 동안엔 글자/커서 변경에 따라
             # 콘텐츠와 위치를 즉시 갱신해 IDE 같은 filter-as-you-type 체감.
             popup = self.query_one("#popup", _CursorPopup)
@@ -666,7 +984,7 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
                 text, self._tables, full_text=full_text)[:30]
 
             # 005 처럼 컨텍스트 라벨 아래에 컬러 칩으로 가능한 항목 노출
-            # (정보용 — 클릭/포커스 X, Ctrl+Space 누르면 진짜 popup 뜸)
+            # (정보용 — 클릭/포커스 X, Ctrl+N 누르면 진짜 popup 뜸)
             kind_color = {
                 "table": "green", "column": "yellow",
                 "keyword": "cyan", "function": "magenta", "star": "white",
@@ -679,8 +997,8 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
 
             self.query_one("#ctx-label", Static).update(Text.from_markup(
                 f"💡 [bold cyan]{ctx_label}[/]  "
-                f"[dim]· Ctrl+Space 자동완성 popup · "
-                f"Tab(에디터) 들여쓰기[/]\n   {chips_str}"
+                f"[dim]· Ctrl+N 자동완성 · Ctrl+E 실행 · Ctrl+K 채팅 · "
+                f"Tab 들여쓰기[/]\n   {chips_str}"
             ))
 
         # ── floating popup 표시 / 숨기기 / 재위치 ──
@@ -729,7 +1047,7 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
                 pass
 
         def action_show_popup(self) -> None:
-            """수동 트리거 (Ctrl+Space)."""
+            """수동 트리거 (Ctrl+N)."""
             self._refresh_suggest()
             if self._current_sugs:
                 self._show_popup()
@@ -942,11 +1260,37 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
         def action_focus_editor(self) -> None:
             self.query_one("#editor", TextArea).focus()
 
+        # ── 💬 채팅 popup (Ctrl+K) ──
+        def action_open_chat(self) -> None:
+            screen = _ChatScreen(
+                on_chat=self.on_chat,
+                history=self.app_state["chat_history"],
+            )
+            self.push_screen(screen, self._chat_response_picked)
+
+        def _chat_response_picked(self, response: Optional[str]) -> None:
+            """Ctrl+I 로 dismiss 된 응답을 에디터 커서 위치에 인서트.
+
+            응답에 ```sql ... ``` 블록이 있으면 그 안 SQL 만 추출해 인서트.
+            없으면 응답 전체를 그대로.
+            """
+            if not response:
+                return
+            sql = _extract_sql_block(response)
+            editor = self.query_one("#editor", TextArea)
+            # 커서가 줄 중간이면 인서트 전에 줄바꿈을 한 번 끼워넣어
+            # 기존 코드와 섞이지 않도록 함.
+            row, col = editor.cursor_location
+            sep = "\n" if col > 0 else ""
+            editor.insert(sep + sql + "\n")
+            editor.focus()
+
         def action_help(self) -> None:
             self.push_screen(_HelpScreen())
 
     return SQLRunnerApp(
         on_execute=on_execute,
+        on_chat=on_chat,
         tables=tables,
         notes=notes,
         initial_query=initial_query,
@@ -965,14 +1309,20 @@ class SQLRunnerTUI:
         on_execute: ``f(sql: str) -> Any`` 콜백. ▶ 실행 시 호출되고,
             반환값이 None 이 아니면 DataTable 에 표시.
             DataFrame / list[dict] 는 자동 표 변환.
+        on_chat: ``f(prompt: str) -> str`` 콜백 (선택). Ctrl+K 채팅 popup
+            에서 호출. 사내 LLM / text2sql / 검색 등을 연동. 응답에
+            `````sql ... ````` 블록이 있으면 Ctrl+I
+            인서트 시 SQL 만 추출. 미주입 시 echo mock.
     """
 
     def __init__(self,
-                 on_execute: Optional[Callable[[str], Any]] = None) -> None:
+                 on_execute: Optional[Callable[[str], Any]] = None,
+                 on_chat: Optional[Callable[[str], str]] = None) -> None:
         self.tables: dict[str, list[dict]] = {}
         self.notes: dict[str, str] = {}
         self.initial_query: str = ""
         self.on_execute = on_execute
+        self.on_chat = on_chat
 
         # 후속 분석을 위한 실행 상태 (App 종료 후에도 runner.last_result 등으로
         # 접근 가능). App 이 같은 dict 를 mutate.
@@ -1087,6 +1437,7 @@ class SQLRunnerTUI:
         """
         app = _build_app(
             on_execute=self.on_execute,
+            on_chat=self.on_chat,
             tables=self.tables,
             notes=self.notes,
             initial_query=self.initial_query,
@@ -1133,7 +1484,7 @@ if __name__ == "__main__":
 
     runner = SQLRunnerTUI.with_sqlite(db_path)
     runner.set_query(
-        "-- Ctrl+R 또는 F5 로 실행 · F1 도움말\n"
+        "-- Ctrl+E / Ctrl+R / F5 실행 · Ctrl+N 자동완성 · Ctrl+/ 주석 · F1 도움말\n"
         "SELECT u.name, u.region, SUM(o.amount) AS total\n"
         "FROM users u JOIN orders o ON o.user_id = u.id\n"
         "WHERE o.status = 'paid'\n"

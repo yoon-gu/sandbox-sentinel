@@ -1,6 +1,6 @@
 # 006 - SQL Runner TUI (Textual · 터미널 풀스크린 · 실행 가능)
 
-> **한 줄 요약**: 터미널 풀스크린에서 동작하는 single-file SQL 편집기 + 실행기. Textual TextArea 의 native SQL syntax highlight 로 **에디터 자체에 색이 입혀지고**, Tab 자동완성 (인라인 OptionList), Ctrl+R 실행, DataTable 결과 — 모두 터미널 안에서.
+> **한 줄 요약**: 터미널 풀스크린에서 동작하는 single-file SQL 편집기 + 실행기. Textual TextArea 의 native SQL syntax highlight 로 **에디터 자체에 색이 입혀지고**, Tab 자동완성 (인라인 OptionList), Ctrl+E / Ctrl+R / F5 실행, DataTable 결과 — 모두 터미널 안에서. **모든 단축키는 노트북 터미널 (xterm.js) 호환**.
 
 ## 005 / 006 한눈에 비교
 
@@ -9,10 +9,10 @@
 | 환경 | Jupyter 노트북 | **터미널** (ssh OK) |
 | 브라우저 / Trust 필요 | ✅ / **Trust 필수** | ❌ |
 | **에디터 자체** syntax 색 | ✅ CodeMirror | ✅ Textual native (tree-sitter SQL) |
-| inline 자동완성 | ✅ Ctrl+Space popup | ✅ 인라인 OptionList (Tab) |
+| inline 자동완성 | ✅ Ctrl+Space popup | ✅ 인라인 OptionList (Tab) + Ctrl+N 커서 popup |
 | 컨텍스트 추천 패널 | ✅ | ✅ |
 | 커서 위치 정밀 인서트 | ✅ | ✅ |
-| ▶ 실행 → Python 콜백 | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+R / F5 |
+| ▶ 실행 → Python 콜백 | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+E / Ctrl+R / F5 |
 | 결과 자동 표 렌더 | ✅ pandas HTML | ✅ Textual DataTable |
 | 후속 분석 | `runner.last_result` / `history` | DataTable 안에서만 |
 | 의존성 | ipywidgets+IPython | **textual + rich** |
@@ -46,15 +46,22 @@
   - `table_name.` 입력 시 → 해당 테이블 컬럼만 한정
   - **fallback** — `WHE`, `GR`, `JOI` 같은 부분 입력은 어느 컨텍스트에서나 KEYWORDS 매치
 
-## 단축키
+## 단축키 (모두 노트북 터미널 / xterm.js 호환)
+
+> Jupyter 의 웹 터미널은 `Ctrl+Enter` 를 newline 으로, `Ctrl+Space` 를 NUL 바이트로 변환해 키 이벤트가 도달하지 않습니다. 본 변환물은 이런 키를 **사용하지 않고** 모두 letter / function 키로만 매핑되어 있습니다.
 
 | 키 | 동작 |
 |---|---|
-| **Tab** | 에디터 ↔ 인라인 추천 리스트 포커스 토글 |
-| **Ctrl+R / F5** | ▶ 실행 (현재 SQL 을 `on_execute` 에 전달) |
+| **Tab / Shift+Tab** | 에디터 들여쓰기 / 해제 |
+| **Ctrl+/** | 현재 줄 / 선택 범위 SQL 주석 (`--`) 토글 |
+| **Ctrl+E / Ctrl+R / F5** | ▶ 실행 (현재 SQL 을 `on_execute` 에 전달) |
+| **Ctrl+N** | 자동완성 popup (커서 근처 floating) |
+| **Ctrl+K** | 💬 채팅 popup (🚧 **미완성** — LLM 연동 hook 만 제공) |
 | **Ctrl+T** | 트리 포커스 |
-| **Ctrl+E** | 에디터 포커스 |
+| **Ctrl+B** | 에디터 포커스 (Back to editor) |
 | **Ctrl+L** | 에디터 비우기 |
+| **Ctrl+S** | ⬇ CSV 저장 (마지막 결과) |
+| **F4** | ⬇ Excel 저장 (마지막 결과) |
 | **F1** | 도움말 |
 | **Ctrl+Q** | 종료 |
 | 트리 ↑↓ Enter | 테이블/컬럼 이름을 현재 커서 위치에 인서트 |
@@ -132,6 +139,32 @@ SQLRunnerTUI(on_execute=run_via_api).from_dict({
     "logs": ["id", "ts", "level", "message"],
 }).run()
 ```
+
+### 💬 채팅 popup 에 사내 LLM 연동 (Ctrl+K) — 🚧 미완성
+
+> **상태**: experimental. 현재 `on_chat=fn` 콜백 hook + 기본 markdown/코드블록 복사만 동작. **streaming · 멀티턴 컨텍스트 · history 검색 · tool-use** 등은 아직 미구현. 사내 LLM 검증용으로 사용해 보시고 피드백 주세요.
+
+```python
+from sql_tui import SQLRunnerTUI
+
+def my_text2sql(prompt: str) -> str:
+    # 사내 LLM 클라이언트 호출 (네트워크 정책에 맞춰 교체)
+    response = internal_llm.complete(prompt)
+    return response   # 응답에 ```sql ... ``` 블록이 있으면 Ctrl+I 시 SQL 만 추출
+
+runner = SQLRunnerTUI(
+    on_execute=lambda sql: pd.read_sql(sql, conn),
+    on_chat=my_text2sql,
+)
+runner.from_sqlite("./demo.db").run()
+```
+
+- **Ctrl+K** → 채팅 popup → Enter 로 prompt 전송 → 응답이 누적
+- **Markdown 렌더링** — 헤딩/리스트/볼드/인라인 코드가 styled. `` ```sql ... ``` `` 블록은 Pygments (monokai) 로 keyword·string·operator 까지 색이 입혀짐 (pygments 는 textual 의 transitive 의존)
+- **📋 코드블록 복사** — 응답의 코드블록은 별도 widget 으로 mount 되어 **클릭하면 클립보드에 복사** (OSC 52 escape sequence — iTerm2 / Alacritty / kitty / WezTerm / Jupyter xterm.js 등에서 동작). 키보드는 **Ctrl+Y** 로 마지막 SQL 블록 복사
+- **Ctrl+I** → 마지막 응답을 에디터 커서 위치에 인서트 (응답에 `` ```sql ... ``` `` 블록이 있으면 SQL 만 추출)
+- 채팅 history 는 popup 을 닫았다 다시 열어도 보존 (markdown 으로 다시 렌더)
+- `on_chat` 미주입 시 echo mock — 흐름만 체험 가능
 
 ### 풍부한 컬럼 description
 
