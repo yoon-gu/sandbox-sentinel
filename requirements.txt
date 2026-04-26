@@ -16,6 +16,7 @@
 # ===== 표준 DS 스택 =====
 numpy
 pandas
+openpyxl              # 006 의 Excel(.xlsx) 다운로드 버튼이 사용
 
 # ===== Jupyter 노트북 변환물 (001/005/006) =====
 jupyterlab

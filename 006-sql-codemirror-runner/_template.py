@@ -361,14 +361,24 @@ _BOOTSTRAP_JS_TPL = r"""
     // 초기 1회
     syncCursor();
 
-    // 식별자 입력 중일 때 자동 popup
+    // 식별자 입력 중일 때 자동 popup. 중간-텍스트 타이핑에서도 안정적으로
+    // 뜨도록 setTimeout 으로 cursorActivity 경합을 피하고, +input/paste 만
+    // 트리거. 마지막 줄의 끝 글자 1자가 word 문자면 발화.
     cm.on("inputRead", function(cm, change){{
-      if(change && change.text && change.text.length === 1){{
-        var t = change.text[0];
-        if(/^[A-Za-z_.]$/.test(t)){{
-          cm.showHint({{ hint: contextHint, completeSingle: false }});
-        }}
-      }}
+      if(!change) return;
+      if(change.origin !== "+input" && change.origin !== "paste") return;
+      var lines = change.text || [];
+      if(lines.length === 0) return;
+      var lastLine = lines[lines.length - 1] || "";
+      if(lastLine.length === 0) return;
+      var lastCh = lastLine[lastLine.length - 1];
+      if(!/[A-Za-z0-9_.]/.test(lastCh)) return;
+      // 다음 tick 으로 미뤄 cursorActivity / change 처리 후 안정 상태에서
+      // showHint. 이미 popup 이 떠 있으면 건너뜀 (중복 방지).
+      setTimeout(function(){{
+        if(cm.state && cm.state.completionActive) return;
+        cm.showHint({{ hint: contextHint, completeSingle: false }});
+      }}, 10);
     }});
 
     // entity 트리 클릭 → CM 커서 위치에 인서트
@@ -466,9 +476,15 @@ _BOOTSTRAP_JS_TPL = r"""
   function contextHint(cm){{
     var cur = cm.getCursor();
     var line = cm.getLine(cur.line);
+    // 양방향 word 경계 — 중간-텍스트 타이핑 시 cursor 뒤 word 문자도 함께
+    // replacement 범위에 포함시켜야 popup 이 열리고 인서트 시 단어가 깨지지
+    // 않음 ('WHERE' 사이에 X 친 → 'WHXERE' 전체를 'WHERE' 로 대치).
     var start = cur.ch, end = cur.ch;
     while(start > 0 && /[\w_.]/.test(line[start-1])) start--;
+    while(end < line.length && /[\w_.]/.test(line[end])) end++;
     var word = line.substring(start, end);
+    // 컨텍스트 분석은 cursor 까지의 텍스트만 — 사용자가 작성한 의도가
+    // cursor 위치까지 반영되어야 정확.
     var beforeAll = cm.getRange({{line:0,ch:0}}, cur);
     var ctx = detectContext(beforeAll);
 
@@ -778,21 +794,28 @@ class SQLRunnerCM:
         )
 
         # ── 액션 버튼 + Output ──
+        # SQL 복사 (clipboard) 는 폐쇄망에서 차단되는 경우가 많아 제거.
+        # 대신 마지막 실행 결과를 CSV / Excel 로 즉시 다운로드.
         run_btn = W.Button(description="▶ 실행 (Cmd/Ctrl+Enter)",
                            button_style="primary",
                            layout=W.Layout(width="auto"))
-        copy_btn = W.Button(description="📋 SQL 복사",
+        csv_btn = W.Button(description="⬇ CSV 다운로드",
+                           tooltip="마지막 실행 결과 (last_result) 를 CSV 로 저장",
+                           layout=W.Layout(width="auto"))
+        xlsx_btn = W.Button(description="⬇ Excel 다운로드",
+                            tooltip="마지막 실행 결과 (last_result) 를 .xlsx 로 저장",
                             layout=W.Layout(width="auto"))
         clear_btn = W.Button(description="🗑 지우기",
                              layout=W.Layout(width="auto"))
         run_btn.on_click(self._on_run)
-        copy_btn.on_click(self._on_copy)
+        csv_btn.on_click(self._on_download_csv)
+        xlsx_btn.on_click(self._on_download_xlsx)
         clear_btn.on_click(self._on_clear)
 
         self._run_box = W.HBox([run_btn], layout=W.Layout(padding="0"))
         self._run_box.add_class(f"cm-run-{self._uid}")
         actions = W.HBox(
-            [self._run_box, copy_btn, clear_btn],
+            [self._run_box, csv_btn, xlsx_btn, clear_btn],
             layout=W.Layout(padding="4px 0"),
         )
 
@@ -1075,26 +1098,90 @@ class SQLRunnerCM:
             pass
         display(result)
 
-    def _on_copy(self, _btn: Any) -> None:
+    def _on_download_csv(self, _btn: Any) -> None:
+        """마지막 실행 결과를 CSV 로 즉시 다운로드.
+
+        clipboard 가 차단되는 폐쇄망에서도 동작하도록 base64 data URI →
+        anchor.click() 패턴 사용. 외부 네트워크 0.
+        """
+        self._download_result("csv")
+
+    def _on_download_xlsx(self, _btn: Any) -> None:
+        """마지막 실행 결과를 Excel (.xlsx) 로 다운로드.
+
+        openpyxl 또는 xlsxwriter 가 필요 (사내 미러 등록본 기준 통상 가용).
+        없으면 안내 메시지로 fallback.
+        """
+        self._download_result("xlsx")
+
+    def _download_result(self, fmt: str) -> None:
         from IPython.display import display, HTML
-        sql_js = (
-            (self._textarea.value if self._textarea is not None else "")
-            .replace("\\", "\\\\")
-            .replace("`", "\\`")
-            .replace("$", "\\$")
-        )
+        import base64, datetime, io
+
         with self._output:
             self._output.clear_output()
+            if self.last_result is None:
+                print(f"⚠ 다운로드할 결과가 없습니다. ▶ 실행 후 시도해 주세요.")
+                return
+            # DataFrame 우선, list[dict] 도 자동 변환
+            try:
+                import pandas as pd
+            except ImportError:
+                print("⚠ pandas 미설치 — CSV/Excel 다운로드는 pandas 필요.")
+                return
+            df = self.last_result
+            if isinstance(df, list) and df and isinstance(df[0], dict):
+                df = pd.DataFrame(df)
+            if not isinstance(df, pd.DataFrame):
+                print(f"⚠ 결과가 DataFrame/list[dict] 형식이 아니라 다운로드 불가 "
+                      f"(type={type(df).__name__}).")
+                return
+
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            try:
+                if fmt == "csv":
+                    buf = io.BytesIO()
+                    df.to_csv(buf, index=False, encoding="utf-8-sig")
+                    payload = buf.getvalue()
+                    mime = "text/csv;charset=utf-8"
+                    fname = f"sql_result_{ts}.csv"
+                else:   # xlsx
+                    buf = io.BytesIO()
+                    try:
+                        df.to_excel(buf, index=False, engine="openpyxl")
+                    except (ImportError, ValueError):
+                        try:
+                            buf = io.BytesIO()
+                            df.to_excel(buf, index=False, engine="xlsxwriter")
+                        except (ImportError, ValueError) as e2:
+                            print("⚠ Excel 엔진 (openpyxl 또는 xlsxwriter) 미설치.")
+                            print("CSV 다운로드는 정상 동작합니다.")
+                            return
+                    payload = buf.getvalue()
+                    mime = ("application/vnd.openxmlformats-officedocument."
+                            "spreadsheetml.sheet")
+                    fname = f"sql_result_{ts}.xlsx"
+            except Exception as e:
+                print(f"❌ 변환 실패: {type(e).__name__}: {e}")
+                return
+
+            b64 = base64.b64encode(payload).decode("ascii")
+            href = f"data:{mime};base64,{b64}"
+            # anchor 자동 클릭 — 브라우저가 다운로드 다이얼로그 띄움.
+            # 클릭 후 사라지지 않도록 명시 링크도 함께 노출 (수동 클릭 fallback).
             display(HTML(
-                "<script>(function(){"
-                "const t=`" + sql_js + "`;"
-                "if(navigator.clipboard&&navigator.clipboard.writeText){"
-                "navigator.clipboard.writeText(t).then("
-                "()=>{},()=>{alert('clipboard 차단 — 수동 복사 필요');}"
-                ");}else{alert('clipboard API 미지원');}"
-                "})();</script>"
-                '<div style="padding:4px 8px;color:#047857;font-size:12px">'
-                '✓ 클립보드에 복사 시도됨</div>'
+                f'<div style="padding:4px 8px;color:#047857;font-size:12px">'
+                f'✓ {fname} 준비됨 ({len(payload):,} bytes, '
+                f'{len(df)} rows × {len(df.columns)} cols)</div>'
+                f'<a id="dl-{self._uid}-{ts}" href="{href}" '
+                f'download="{fname}" '
+                f'style="display:inline-block;padding:4px 10px;'
+                f'background:#2563eb;color:#fff;text-decoration:none;'
+                f'border-radius:4px;font-size:12px;margin:2px 0">'
+                f'⬇ {fname} 직접 다운로드</a>'
+                f'<script>(function(){{ '
+                f'var a=document.getElementById("dl-{self._uid}-{ts}"); '
+                f'if(a) a.click(); }})();</script>'
             ))
 
     def _on_clear(self, _btn: Any) -> None:
