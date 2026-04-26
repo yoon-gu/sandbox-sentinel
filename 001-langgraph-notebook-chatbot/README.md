@@ -2,7 +2,7 @@
 
 > **한 줄 요약**: 폐쇄망 Jupyter 노트북에서 돌리는 LangGraph 멀티턴 챗봇 + LangSmith 스타일의 self-contained HTML 관찰성(observability) 뷰어
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yoon-gu/sandbox-sentinel/blob/master/001-langgraph-notebook-chatbot/examples/demo.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/yoon-gu/sandbox-sentinel/blob/master/001-langgraph-notebook-chatbot/demo.ipynb)
 
 > 💡 **Colab 으로 빠르게 체험하기**: 위 배지를 누르면 `demo.ipynb` 가 Google Colab 에서 열립니다. 첫 code 셀이 Colab 을 감지해 GitHub raw URL 에서 `chatbot.py` 를 자동으로 내려받으므로 별도 clone/설치 없이 바로 실행 가능합니다. 폐쇄망 환경에서는 해당 우회가 건너뛰어지고 상대경로로 로드됩니다.
 
@@ -41,13 +41,13 @@
 
 ## 사용 예시
 
-가장 빠른 길은 `examples/demo.ipynb` 를 JupyterLab 에서 여는 것입니다. 노트북 최상단의 **0. 인터랙티브 채팅 UI** 셀 하나만 실행해도 셀 output 안에서 멀티턴 대화 + 트레이스 조회가 바로 가능합니다.
+가장 빠른 길은 `demo.ipynb` 를 JupyterLab 에서 여는 것입니다. 노트북 최상단의 **0. 인터랙티브 채팅 UI** 셀 하나만 실행해도 셀 output 안에서 멀티턴 대화 + 트레이스 조회가 바로 가능합니다.
 
 > ⌨️ **단축키**: 채팅 입력칸은 단행 `Text` 위젯이라 **Enter 만 누르면 전송**됩니다. (보내기/답변 제출 버튼도 그대로 작동) 다중라인 입력은 ipywidgets 만으로는 단축키 분기가 안 되어 의도적으로 비활성화 — 긴 텍스트는 단행으로 압축하거나 paste 후 송신.
 
 ```bash
 # 리포 루트의 통일 .venv 를 사용 (셋업: 루트 README 참고)
-.venv/bin/jupyter lab 001-langgraph-notebook-chatbot/examples/demo.ipynb
+.venv/bin/jupyter lab 001-langgraph-notebook-chatbot/demo.ipynb
 ```
 
 노트북에서 쓰이는 핵심 API:
@@ -177,8 +177,7 @@ bot.chat_ui()
 ├── chatbot.py              # single-file 본체 (Tracer + MockLLM + Graph + HTML 템플릿)
 ├── metadata.json
 ├── LICENSE                 # 원본(langgraph) MIT 라이선스 복제본
-└── examples/
-    └── demo.ipynb          # 노트북 데모 (최상단에 인터랙티브 chat_ui 셀, 이후 단계별 셀 예시)
+└── demo.ipynb               # 노트북 데모 (최상단에 인터랙티브 chat_ui 셀, 이후 단계별 셀 예시)
 ```
 
 ## 알려진 제약 / 한계

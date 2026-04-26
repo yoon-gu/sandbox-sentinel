@@ -29,9 +29,9 @@
 
 # 3) 변환물 실행 (예시)
 .venv/bin/jupyter lab                                  # 001/005/006 노트북
-.venv/bin/python 003-langgraph-chat-repl/examples/basic_usage.py
-.venv/bin/python 004-langgraph-prompt-toolkit-repl/examples/basic_usage.py
-.venv/bin/python 007-sql-tui-runner/examples/basic_usage.py
+.venv/bin/python 003-langgraph-chat-repl/basic_usage.py
+.venv/bin/python 004-langgraph-prompt-toolkit-repl/basic_usage.py
+.venv/bin/python 007-sql-tui-runner/basic_usage.py
 ```
 
 > **폐쇄망 정책**: `requirements.txt` 의 패키지/버전은 [`environment-adapter` Skill](.claude/skills/environment-adapter/stacks/default.yaml) 의 허용 목록과 일치해야 합니다. 사내 미러에 등록되지 않은 패키지가 있으면 Skill 에 알려주세요.

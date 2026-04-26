@@ -154,8 +154,7 @@ runner.add_table("users", [
 ├── sql_tui.py             # ⭐ single-file (~25KB)
 ├── metadata.json
 ├── LICENSE                # MIT (Textual 라이선스 명시)
-└── examples/
-    └── basic_usage.py     # CLI --check 검증 + 풀스크린 TUI 데모
+└── basic_usage.py        # CLI --check 검증 + 풀스크린 TUI 데모
 ```
 
 ## 실행 방법
@@ -164,10 +163,10 @@ runner.add_table("users", [
 # 리포 루트의 통일 .venv 를 사용 (셋업: 루트 README 참고)
 
 # CLI 단위 검증 (TUI 띄우지 않고 detect_context/get_suggestions 만)
-.venv/bin/python 007-sql-tui-runner/examples/basic_usage.py --check
+.venv/bin/python 007-sql-tui-runner/basic_usage.py --check
 
 # 풀스크린 TUI 진입 (4 테이블, ~5명 사용자, 6건 주문 데모)
-.venv/bin/python 007-sql-tui-runner/examples/basic_usage.py
+.venv/bin/python 007-sql-tui-runner/basic_usage.py
 
 # 또는 sql_tui.py 자체에 들어있는 단순 데모
 .venv/bin/python 007-sql-tui-runner/sql_tui.py

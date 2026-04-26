@@ -25,7 +25,7 @@ LangGraph 기반 터미널 챗봇 REPL (Textual 풀스크린 TUI)
   4) 트레이스 — 001 의 Tracer 이식, /trace 로 self-contained HTML 저장
   5) 외부 네트워크 / 바이너리 영속화 / 포트 오픈 0
 
-사용 예시는 파일 하단 `if __name__ == "__main__":` 또는 examples/basic_usage.py 참고.
+사용 예시는 파일 하단 `if __name__ == "__main__":` 또는 basic_usage.py 참고.
 """
 
 # ===== 1. Imports =====
@@ -1157,6 +1157,6 @@ _TRACE_HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 if __name__ == "__main__":
     print(
-        "이 파일은 라이브러리입니다. 사용 예시는 examples/basic_usage.py 를 참고하세요.\n"
-        "  python examples/basic_usage.py"
+        "이 파일은 라이브러리입니다. 사용 예시는 basic_usage.py 를 참고하세요.\n"
+        "  python basic_usage.py"
     )

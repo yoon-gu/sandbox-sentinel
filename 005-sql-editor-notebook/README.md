@@ -125,8 +125,7 @@ pd.read_sql(sql, conn)
 ├── sql_editor.py           # single-file 본체 (SQLEditor + HTML/CSS/JS 템플릿)
 ├── metadata.json
 ├── LICENSE                 # MIT (오리지널)
-└── examples/
-    └── demo.ipynb          # 노트북 데모
+└── demo.ipynb              # 노트북 데모
 ```
 
 ## 폐쇄망 친화 체크
