@@ -52,7 +52,7 @@ SQL Runner TUI — Textual 기반 single-file SQL 편집기 + 실행 위젯.
     Ctrl+S          ⬇ CSV 저장
     F4              ⬇ Excel 저장
     F1              도움말
-    Ctrl+Q / Ctrl+C 종료
+    Ctrl+X / Ctrl+Q 종료
 """
 from __future__ import annotations
 
@@ -790,7 +790,7 @@ def _build_app(*, on_execute, tables, notes, initial_query,
                     "  [yellow]Ctrl+S[/]   ⬇ CSV 저장 (마지막 결과)\n"
                     "  [yellow]F4[/]       ⬇ Excel 저장 (마지막 결과)\n"
                     "  [yellow]F1[/]       이 도움말\n"
-                    "  [yellow]Ctrl+Q[/]   종료\n\n"
+                    "  [yellow]Ctrl+X / Ctrl+Q[/]  종료\n\n"
                     "[b]결과 DataTable 스크롤[/] (포커스 후)\n\n"
                     "  [yellow]↑↓[/]              한 행 이동\n"
                     "  [yellow]PageUp/PageDown[/]  한 페이지 이동\n"
@@ -835,7 +835,7 @@ def _build_app(*, on_execute, tables, notes, initial_query,
             Binding("ctrl+s",     "save_csv",     "⬇ CSV"),
             Binding("f4",         "save_xlsx",    "⬇ Excel",  priority=True),
             Binding("f1",         "help",         "도움말"),
-            Binding("ctrl+q",     "quit",         "종료",     priority=True),
+            Binding("ctrl+q,ctrl+x", "quit",      "종료",     priority=True),
         ]
 
         def __init__(self, *, on_execute, tables, notes, initial_query,
