@@ -2,13 +2,9 @@
 
 > **한 줄 요약**: CodeMirror 5.65.16 을 single-file `.py` 안에 통째로 인라인하여 Jupyter 셀에서 **에디터 자체에 syntax highlight + popup 자동완성** 이 적용되는 SQL Runner. ▶ 실행 (Cmd/Ctrl+Enter) 으로 Python 콜백 호출.
 
-## 시연 영상
+## 시연
 
-<video src="screencast.mp4" controls width="100%" muted playsinline>
-  영상이 표시되지 않으면 <a href="screencast.mp4">screencast.mp4</a> 를 직접 클릭해 보세요.
-</video>
-
-> 📺 GitHub 에서 inline 재생이 안 되면 [`screencast.mp4`](screencast.mp4) 파일을 직접 클릭하세요 — GitHub 의 파일 뷰어가 비디오 플레이어로 열어줍니다. 강제 inline 임베드가 필요하면 GitHub 웹 UI 의 issue/PR 에 mp4 를 드래그해 `https://github.com/user-attachments/assets/...` URL 을 받아 위 `<video src=...>` 자리에 그 URL 을 붙여넣으세요.
+![006 SQL Runner 시연](screencast.gif)
 
 ## 005 / 006 / 007 선택 가이드
 
