@@ -203,7 +203,7 @@ def run_tui() -> None:
     ], description="유저 행동 로그")
 
     runner.set_query(
-        "-- Ctrl+R / F5 / Ctrl+Enter 실행 · Ctrl+N 자동완성 · Ctrl+/ 주석 · Ctrl+K 채팅(🚧)\n"
+        "-- Ctrl+R 또는 F5 실행 · Ctrl+N 자동완성 · Ctrl+/ 주석 · Ctrl+K 채팅(🚧)\n"
         "-- Ctrl+E/A 줄끝/줄시작(Cmd+→/←)·Ctrl+B 에디터·Ctrl+T 트리·F1 도움말\n"
         "SELECT u.name, u.region, u.plan_type,\n"
         "       COUNT(o.id) AS n_orders,\n"

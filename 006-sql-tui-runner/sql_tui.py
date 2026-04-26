@@ -20,7 +20,7 @@ SQL Runner TUI — Textual 기반 single-file SQL 편집기 + 실행 위젯.
      · ↑↓     : 추천 후보 사이 이동
      · Enter  : 선택 → 에디터 커서 위치에 인서트 + 에디터 복귀
      · Esc/Tab: 에디터로 복귀 (선택 없이)
-  4) Ctrl+R / F5 / Ctrl+Enter → on_execute(sql) 콜백 호출, DataTable 에 결과 표시
+  4) Ctrl+R / F5 → on_execute(sql) 콜백 호출, DataTable 에 결과 표시
   5) 외부 네트워크 / CDN / 바이너리 영속화 0 — 단일 .py 반입
 
 사용 예시
@@ -41,8 +41,7 @@ SQL Runner TUI — Textual 기반 single-file SQL 편집기 + 실행 위젯.
 
 키 바인딩
 --------
-    Ctrl+R / F5     ▶ 실행 (모든 터미널 호환)
-    Ctrl+Enter      ▶ 실행 (xterm.js / Jupyter 터미널 제외)
+    Ctrl+R / F5     ▶ 실행
     Ctrl+N          자동완성 popup (커서 근처)
     Ctrl+K          💬 채팅 popup (🚧 미완성 — LLM 연동 hook 만 제공)
     Ctrl+/          현재 줄 / 선택 범위 SQL 주석 (--) 토글
@@ -779,8 +778,7 @@ def _build_app(*, on_execute, tables, notes, initial_query,
                     "  [yellow]Ctrl+N[/]           자동완성 popup (커서 근처)\n"
                     "  [yellow]Ctrl+E[/] / [yellow]Cmd+→[/]    줄 끝으로 커서 이동\n"
                     "  [yellow]Ctrl+A[/] / [yellow]Cmd+←[/]    줄 시작으로 커서 이동\n"
-                    "  [yellow]Ctrl+R / F5[/]      ▶ 실행 [dim](모든 터미널 호환)[/]\n"
-                    "  [yellow]Ctrl+Enter[/]       ▶ 실행 [dim](xterm.js/Jupyter 제외)[/]\n\n"
+                    "  [yellow]Ctrl+R / F5[/]      ▶ 실행\n\n"
                     "[b]자동완성 popup (Ctrl+N)[/]\n\n"
                     "  • 커서 한 줄 아래에 floating 으로 등장\n"
                     "  • [yellow]↑↓[/]    후보 이동\n"
@@ -832,10 +830,10 @@ def _build_app(*, on_execute, tables, notes, initial_query,
         """
 
         BINDINGS = [
-            # 실행: Ctrl+R / F5 / Ctrl+Enter (Ctrl+Enter 는 Unix 관습상
-            # Ctrl+J 로 송신되어 그것도 받음). Ctrl+E 는 macOS 의 Cmd+→ 와
-            # 충돌해 줄 끝 이동에 양보 (에디터 BINDINGS 에서 처리).
-            Binding("ctrl+r,f5,ctrl+enter,ctrl+j",  "run",
+            # 실행: Ctrl+R / F5. Ctrl+Enter 는 xterm.js / Jupyter 터미널에서
+            # newline 으로 변환되어 일관성을 해쳐 제거. Ctrl+E 는 macOS 의
+            # Cmd+→ 와 충돌해 줄 끝 이동에 양보 (에디터 BINDINGS 에서 처리).
+            Binding("ctrl+r,f5",  "run",
                     "▶ 실행", priority=True),
             Binding("ctrl+n",     "show_popup",   "자동완성", priority=True),
             Binding("ctrl+k",     "open_chat",    "💬 채팅(🚧)",  priority=True),
@@ -888,7 +886,7 @@ def _build_app(*, on_execute, tables, notes, initial_query,
                         )
                     yield editor
                     yield Static("", id="ctx-label")
-                    yield Static("📤 결과 (Ctrl+R / F5 / Ctrl+Enter 로 실행)",
+                    yield Static("📤 결과 (Ctrl+R 또는 F5 로 실행)",
                                  id="results-label")
                     yield DataTable(id="results", zebra_stripes=True)
             # 커서 근처에 뜨는 floating 자동완성 popup. 항상 mount 되어 있고
@@ -1494,7 +1492,7 @@ if __name__ == "__main__":
 
     runner = SQLRunnerTUI.with_sqlite(db_path)
     runner.set_query(
-        "-- Ctrl+R / F5 / Ctrl+Enter 실행 · Ctrl+N 자동완성 · Ctrl+/ 주석 · F1 도움말\n"
+        "-- Ctrl+R 또는 F5 실행 · Ctrl+N 자동완성 · Ctrl+/ 주석 · F1 도움말\n"
         "SELECT u.name, u.region, SUM(o.amount) AS total\n"
         "FROM users u JOIN orders o ON o.user_id = u.id\n"
         "WHERE o.status = 'paid'\n"
