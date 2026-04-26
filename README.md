@@ -14,6 +14,29 @@
 
 사용자는 원하는 변환물 폴더의 `.py` 파일만 폐쇄망에 반입하면 됩니다. 리포 전체를 반입할 필요가 없습니다.
 
+## 개발 환경 셋업 (한 번만)
+
+7개 변환물이 **리포 루트의 단일 `.venv` 를 공유** 합니다 (Python 3.11). 폴더별 `.venv` 는 두지 않습니다.
+
+```bash
+# 1) Python 3.11 가상환경 생성
+/opt/homebrew/bin/python3.11 -m venv .venv     # macOS
+# python3.11 -m venv .venv                      # Linux
+
+# 2) 패키지 설치 — textual 은 스택 정책에 따라 --no-deps 필수
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install --no-deps textual==6.11.0
+
+# 3) 변환물 실행 (예시)
+.venv/bin/jupyter lab                                  # 001/005/006 노트북
+.venv/bin/python 003-langgraph-chat-repl/examples/basic_usage.py
+.venv/bin/python 004-langgraph-prompt-toolkit-repl/examples/basic_usage.py
+.venv/bin/python 007-sql-tui-runner/examples/basic_usage.py
+```
+
+> **폐쇄망 정책**: `requirements.txt` 의 패키지/버전은 [`environment-adapter` Skill](.claude/skills/environment-adapter/stacks/default.yaml) 의 허용 목록과 일치해야 합니다. 사내 미러에 등록되지 않은 패키지가 있으면 Skill 에 알려주세요.
+> **torch / transformers 제외**: 002 의 `hf_trainer_demo.py` 만 필요로 하므로 통일 `.venv` 에서 의도적으로 제외했습니다 (~5GB 절감). 002 의 풀 데모를 돌리려면 별도 설치하세요.
+
 ## 리포 구조
 
 ```

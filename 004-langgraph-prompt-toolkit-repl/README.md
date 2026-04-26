@@ -67,8 +67,8 @@
 ### 빠른 체험 (MockLLM + HITL 포함 그래프)
 
 ```bash
-cd 004-langgraph-prompt-toolkit-repl
-.venv/bin/python examples/basic_usage.py
+# 리포 루트의 통일 .venv 를 사용 (셋업: 루트 README 참고)
+.venv/bin/python 004-langgraph-prompt-toolkit-repl/examples/basic_usage.py
 ```
 
 실행 후 입력창에 치트시트 문구를 넣어보세요:

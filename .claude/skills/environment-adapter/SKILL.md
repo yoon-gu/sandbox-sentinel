@@ -139,12 +139,12 @@ CLAUDE.md 는 "**환경 무관 공통 원칙**" (변환 워크플로, 코드 스
 
 ### 5. 런타임 환경 검증 (⭐ 매번 반드시)
 
-사용자가 변환물을 **실제로 실행/테스트** 하는 흐름 (예: `cd NNN-* && .venv/bin/python examples/basic_usage.py`) 이 발생할 때 — 또는 Agent 가 스모크 테스트로 변환물을 돌려볼 때 — **반드시 다음 체크를 먼저 수행**:
+사용자가 변환물을 **실제로 실행/테스트** 하는 흐름 (예: `.venv/bin/python NNN-*/examples/basic_usage.py`) 이 발생할 때 — 또는 Agent 가 스모크 테스트로 변환물을 돌려볼 때 — **반드시 다음 체크를 먼저 수행**:
 
 **체크 절차**:
 
 1. **활성 스택의 `python` 필드 읽기** — 예: `stacks/default.yaml` 의 `python: "3.11"`
-2. **실행 환경의 Python 버전 확인** — 대상 폴더 하위 `.venv/bin/python --version` (또는 사용자가 명시한 인터프리터)
+2. **실행 환경의 Python 버전 확인** — 리포 루트 단일 `.venv/bin/python --version` (이 리포는 7개 변환물이 통일 `.venv` 를 공유)
 3. **불일치 시 사용자에게 알림** — 자동으로 재생성하지 않고 먼저 보고:
    ```
    ⚠️ 스택 스펙(python 3.11)과 .venv 버전(python 3.14) 이 다릅니다.
@@ -152,9 +152,10 @@ CLAUDE.md 는 "**환경 무관 공통 원칙**" (변환 워크플로, 코드 스
    ```
 4. **사용자 동의 후 재생성** — 예 (macOS/Linux):
    ```bash
-   rm -rf <폴더>/.venv
-   /opt/homebrew/bin/python3.11 -m venv <폴더>/.venv
-   <폴더>/.venv/bin/pip install <필요 패키지>
+   rm -rf .venv
+   /opt/homebrew/bin/python3.11 -m venv .venv
+   .venv/bin/pip install -r requirements.txt
+   .venv/bin/pip install --no-deps textual==6.11.0   # 스택 정책
    ```
    Windows 등 플랫폼은 동등한 명령으로 대체.
 
@@ -167,18 +168,15 @@ CLAUDE.md 는 "**환경 무관 공통 원칙**" (변환 워크플로, 코드 스
 - 새 venv 를 생성할 때 (`python -m venv`)
 - 기존 변환물을 실행/디버깅할 때 (사용자가 `python examples/*.py` 같은 명령을 준비/요청할 때)
 - Agent 가 자체 스모크 테스트를 돌리기 전
-- 변환물별 `.venv/` 가 여러 개 있는 경우 전부 일괄 확인
 
 **체크 스니펫** (참고용):
 ```bash
 # 스택에서 python 버전 읽기
 STACK_PY=$(grep '^python:' .claude/skills/environment-adapter/stacks/default.yaml | awk -F'"' '{print $2}')
 
-# 각 변환물 .venv 버전 확인
-for d in ???-*/; do
-  VENV_PY=$("$d.venv/bin/python" --version 2>&1 | awk '{print $2}' | cut -d. -f1-2)
-  [ "$VENV_PY" = "$STACK_PY" ] && echo "✓ $d : $VENV_PY" || echo "⚠ $d : $VENV_PY (기대: $STACK_PY)"
-done
+# 통일 .venv 버전 확인
+VENV_PY=$(.venv/bin/python --version 2>&1 | awk '{print $2}' | cut -d. -f1-2)
+[ "$VENV_PY" = "$STACK_PY" ] && echo "✓ .venv : $VENV_PY" || echo "⚠ .venv : $VENV_PY (기대: $STACK_PY)"
 ```
 
 ---

@@ -46,8 +46,8 @@
 > ⌨️ **단축키**: 채팅 입력칸은 단행 `Text` 위젯이라 **Enter 만 누르면 전송**됩니다. (보내기/답변 제출 버튼도 그대로 작동) 다중라인 입력은 ipywidgets 만으로는 단축키 분기가 안 되어 의도적으로 비활성화 — 긴 텍스트는 단행으로 압축하거나 paste 후 송신.
 
 ```bash
-cd 001-langgraph-notebook-chatbot
-jupyter lab examples/demo.ipynb
+# 리포 루트의 통일 .venv 를 사용 (셋업: 루트 README 참고)
+.venv/bin/jupyter lab 001-langgraph-notebook-chatbot/examples/demo.ipynb
 ```
 
 노트북에서 쓰이는 핵심 API:
