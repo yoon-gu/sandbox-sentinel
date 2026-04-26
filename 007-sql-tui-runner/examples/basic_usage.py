@@ -1,4 +1,4 @@
-"""008-sql-tui-runner — CLI 기본 동작 검증 + 풀스크린 TUI 진입.
+"""007-sql-tui-runner — CLI 기본 동작 검증 + 풀스크린 TUI 진입.
 
 검증만 하려면 ``--check`` 플래그. 인자 없이 실행하면 풀스크린 TUI 가 뜸.
 """

@@ -1,5 +1,5 @@
 {
-  "id": "008",
+  "id": "007",
   "name": "sql-tui-runner",
   "source": {
     "library": "Textual (TUI 프레임워크)",
@@ -27,17 +27,17 @@
     "Textual App: Tree(좌) + TextArea(에디터) + Static(추천 라인) + DataTable(결과)",
     "TextArea language='sql' — native syntax highlight (라인 번호, soft wrap, 자동 들여쓰기)",
     "Ctrl+R / F5 — ▶ 실행 → on_execute(sql) 콜백 호출 → 결과를 DataTable 에 표 변환",
-    "Ctrl+Space — 자동완성 popup (ModalScreen + OptionList, 컨텍스트 인식)",
-    "컨텍스트 인식 정책 (005~007 과 동일): FROM→테이블, SELECT→컬럼, table.→qualifier, fallback 으로 KEYWORDS/FUNCTIONS 항상 후보",
+    "Tab — 인라인 추천 OptionList 로 포커스 이동 (Enter 인서트, Esc 복귀)",
+    "컨텍스트 인식 정책 (005/006 과 동일): FROM→테이블, SELECT→컬럼, table.→qualifier, fallback 으로 KEYWORDS/FUNCTIONS 항상 후보",
     "Tree 노드 선택 (테이블/컬럼) → 이름을 현재 커서 위치에 인서트 (마지막 부분 단어 prefix 매치 시 치환)",
     "DataFrame 자동 표 변환, list[dict] / list[tuple] 도 지원",
     "외부 네트워크/CDN/바이너리 영속화 0 — single-file .py 반입"
   ],
   "limitations": [
-    "결과를 다음 셀/스크립트로 넘기기 어려움 — DataTable 시각화 only. 후속 분석이 필요하면 006/007 (노트북) 사용 권장.",
+    "결과를 다음 셀/스크립트로 넘기기 어려움 — DataTable 시각화 only. 후속 분석이 필요하면 006 (CodeMirror 노트북) 사용 권장.",
     "터미널 너비 제약 — 결과 컬럼이 많으면 가로 스크롤 필요. CJK 폰트 환경에서 가독성 떨어질 수 있음.",
     "Korean (CJK) cursor 위치는 TextArea 가 wide character 를 인식하지만, 일부 터미널 폰트에서 시각적으로 어긋날 수 있음.",
     "Textual TextArea 의 SQL highlight 는 native bundled grammar 가 빠진 stripped 빌드에선 plain text 로 fall back.",
-    "CTE / 서브쿼리 경계 부정확 — 005~007 와 동일하게 간이 토큰 분리."
+    "CTE / 서브쿼리 경계 부정확 — 005/006 와 동일하게 간이 토큰 분리."
   ]
 }

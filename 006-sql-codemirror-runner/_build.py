@@ -1,4 +1,4 @@
-"""build script for 007-sql-codemirror-runner.
+"""build script for 006-sql-codemirror-runner.
 
 reads _assets/*.{js,css} and emits a single-file sql_codemirror.py with
 the entire CodeMirror 5.65.16 bundle embedded as raw-string constants.

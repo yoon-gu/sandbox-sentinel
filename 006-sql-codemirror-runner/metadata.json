@@ -1,5 +1,5 @@
 {
-  "id": "007",
+  "id": "006",
   "name": "sql-codemirror-runner",
   "source": {
     "library": "CodeMirror 5 (core + mode/sql + addon/hint/show-hint + theme/dracula) — 인라인 임베드",
@@ -19,17 +19,17 @@
     "CM SQL mode + dracula 다크 테마 + 라인 번호 + 라인 wrap + 자동 들여쓰기",
     "CM show-hint addon 으로 popup 자동완성 (Ctrl/Cmd+Space, 식별자 입력 중 자동)",
     "컨텍스트 인식 hint 함수 — 005 의 anchor 정책(FROM→테이블, SELECT→컬럼, table.→qualifier)을 JS 사이드로 그대로 재현",
-    "▶ 실행 → on_execute(sql) Python 콜백 호출 (006 와 동일 API)",
+    "▶ 실행 → on_execute(sql) Python 콜백 호출",
     "Cmd/Ctrl+Enter 단축키로도 ▶ 실행",
     "CM ↔ hidden ipywidgets.Textarea 동기화 — native 'input' 이벤트 dispatch 로 Python 쪽 value 자동 갱신",
     "좌측 entity 트리 클릭 → CM 의 현재 커서 위치에 정확히 인서트 (마지막 부분 단어 prefix 매치 시 자동 치환)",
     "외부 네트워크/CDN/바이너리 영속화 0 · 단일 .py 반입"
   ],
   "limitations": [
-    "Trusted notebook 필요 — JupyterLab 의 untrusted 상태에서는 인라인 <script> 가 차단되어 CodeMirror 가 mount 되지 않음. 이 제약이 부담이면 006 사용 권장.",
-    "파일 크기 ~270KB — 005/006(각 ~30KB) 의 약 9배. 다만 CodeMirror MIT 라이선스 한 건만 추가 검토하면 됨.",
+    "Trusted notebook 필요 — JupyterLab 의 untrusted 상태에서는 인라인 <script> 가 차단되어 CodeMirror 가 mount 되지 않음. 이 제약이 부담이면 005 (HTML/JS only) 또는 007 (TUI) 사용 권장.",
+    "파일 크기 ~280KB — 005(~30KB) 보다 약 9배. 다만 CodeMirror MIT 라이선스 한 건만 추가 검토하면 됨.",
     "CodeMirror 5 (legacy maintenance mode) 사용 — v6 는 ESM 번들러가 필요해 raw-string 인라인 불가. v5 는 본 용도(SQL 편집기) 에 충분.",
-    "CTE / 서브쿼리 경계 부정확 — 005/006 와 동일하게 간이 토큰 분리.",
+    "CTE / 서브쿼리 경계 부정확 — 005 와 동일하게 간이 토큰 분리.",
     "comm channel 비공개 사용 — CM 의 값을 hidden Textarea 의 native input 이벤트로 동기화. 향후 ipywidgets 의 내부 동기 메커니즘이 바뀌면 깨질 수 있음 (현재 ipywidgets v7/v8 안정).",
     "build 시점에만 외부 네트워크 필요 (CodeMirror npm 자산 다운로드). 산출물 sql_codemirror.py 자체에는 외부 참조 없음."
   ]

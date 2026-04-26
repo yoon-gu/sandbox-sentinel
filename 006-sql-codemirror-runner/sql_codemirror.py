@@ -1,22 +1,22 @@
 """
 SQL Runner with CodeMirror inline (single-file, 폐쇄망 친화).
 
-005/006 와의 관계
-----------------
+005 / 006 / 007 변환물 비교
+---------------------------
   · 005 = HTML/JS 단독 SQL 편집기 (popup 자동완성, Python 콜백 없음)
-  · 006 = ipywidgets Textarea 기반 (실행 가능 + 라이브 강조 별도 프리뷰)
-  · 007 = **CodeMirror 5.65.16 인라인 임베드** — 에디터 자체에 syntax
-          highlight 색이 입혀지고, popup 자동완성도 inline 으로 동작.
-          ▶ 실행 버튼으로 Python 콜백 호출 (006 와 동일).
+  · 006 = **CodeMirror 5.65.16 인라인 임베드** (이 파일) — 에디터 자체에
+          syntax highlight 색이 입혀지고, popup 자동완성도 inline 으로 동작.
+          ▶ 실행 버튼으로 Python 콜백 호출.
+  · 007 = 터미널 풀스크린 (Textual TUI) — 노트북/브라우저 불필요, ssh 친화.
 
-포지셔닝 한 줄: "005 의 자유도 + 006 의 실행성 + 진짜 IDE 같은 에디터 체감"
+포지셔닝 한 줄: "노트북 안에서 진짜 IDE 같은 SQL 편집 체감 + ▶ 실행 콜백"
 
 라이선스: MIT (CodeMirror) + MIT (오리지널 wrapper)
 생성: Code Conversion Agent
 
 핵심 기능
 --------
-  1) 좌측 entity 트리 — 005/006 와 동일 API (add_table / from_dict /
+  1) 좌측 entity 트리 — 005 와 동일 스키마 API (add_table / from_dict /
      from_sqlite / from_dataframes), 클릭 시 에디터 커서 위치에 정확히 인서트
   2) 우측 CodeMirror 에디터 — SQL syntax highlight, line number, dracula
      dark theme. Ctrl+Space → 컨텍스트 인식 자동완성 popup
@@ -540,11 +540,12 @@ _FUNCTIONS = [
 ]
 
 
-# ===== 컨텍스트 감지 + 추천 (Python 사이드 — 005/006 동일 골격) =====
+# ===== 컨텍스트 감지 + 추천 (Python 사이드 — 005 와 동일 골격) =====
 # CM 안의 popup 자동완성은 JS 사이드에서 contextHint() 가 처리.
 # 여기 Python 함수들은 에디터 아래에 늘 띄워두는 칩 패널 (=005 의 추천
-# 영역) 을 ipywidgets.Button 으로 그릴 때 사용한다. cursor 위치를 모르므로
-# 005 와 달리 "텍스트 끝" 을 기준으로 동작 (006 와 동일 한계).
+# 영역) 을 ipywidgets.Button 으로 그릴 때 사용한다. JS 가 cursorActivity
+# 마다 'before-cursor' 텍스트를 hidden Textarea 로 sync 하므로 이 함수는
+# 그 텍스트를 받아 context 를 분석한다.
 
 _ANCHORS = {
     "SELECT", "FROM", "WHERE", "JOIN", "ON", "AND", "OR",
@@ -1057,7 +1058,7 @@ class SQLRunnerCM:
         """last_result 의 짧은 alias — runner.result 로 바로 접근."""
         return self.last_result
 
-    # ----- 편의 생성자 (006 의 with_sqlite 와 동일 패턴) -----
+    # ----- 편의 생성자 (007 의 with_sqlite 와 동일 패턴) -----
 
     @classmethod
     def with_sqlite(cls, db_path: str) -> "SQLRunnerCM":
@@ -1083,7 +1084,7 @@ class SQLRunnerCM:
         runner.from_sqlite(db_path)
         return runner
 
-    # ----- 스키마 등록 (005/006 와 동일 API) -----
+    # ----- 스키마 등록 (005 와 동일 API) -----
 
     def add_table(self, name: str,
                   columns: Iterable[ColumnSpec],

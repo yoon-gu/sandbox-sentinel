@@ -1,12 +1,12 @@
 """
 SQL Runner TUI — Textual 기반 single-file SQL 편집기 + 실행 위젯.
 
-005 / 006 / 007 의 TUI 버전:
+005 / 006 / 007 변환물 비교:
   · 005 = 노트북 HTML/JS only (popup 자동완성, 실행 불가)
-  · 006 = 노트북 ipywidgets (실행 가능, 별도 syntax 프리뷰)
-  · 007 = 노트북 + CodeMirror 인라인 (~270KB, trusted notebook 필요)
-  · 008 = **터미널 TUI (Textual)** — 노트북/브라우저 불필요, ssh 친화,
-          에디터 자체에 SQL syntax color (Textual TextArea native)
+  · 006 = 노트북 + CodeMirror 인라인 (~285KB, trusted notebook 필요)
+  · 007 = **터미널 TUI (Textual)** (이 파일) — 노트북/브라우저 불필요,
+          ssh 친화, 에디터 자체에 SQL syntax color (Textual TextArea
+          native + tree-sitter-sql)
 
 라이선스: MIT (오리지널 wrapper) · Textual MIT
 생성: Code Conversion Agent
@@ -61,7 +61,7 @@ from typing import Any, Callable, Iterable, Mapping, Optional, Union
 ColumnSpec = Union[str, tuple, Mapping[str, Any]]
 
 
-# ===== SQL 키워드 / 함수 / anchor (005~007 와 동일 세트) =====
+# ===== SQL 키워드 / 함수 / anchor (005 / 006 와 동일 세트) =====
 
 _KEYWORDS = [
     "SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "IN", "LIKE", "IS", "NULL",
@@ -306,7 +306,7 @@ def _build_app(*, on_execute, tables, notes, initial_query):
                     "[b]트리 사용법[/]\n\n"
                     "  ↑↓ 이동, Enter 선택 → 에디터 커서 위치에 인서트.\n"
                     "  테이블 노드 = 테이블명 인서트, 컬럼 노드 = 컬럼명 인서트.\n\n"
-                    "[b]자동완성 정책[/] (005~007 과 동일)\n\n"
+                    "[b]자동완성 정책[/] (005 / 006 과 동일)\n\n"
                     "  • FROM / JOIN 다음 → 테이블\n"
                     "  • SELECT 다음 → 컬럼 + * + 함수\n"
                     "  • WHERE / AND / GROUP BY / ORDER BY 다음 → 컬럼\n"
@@ -628,7 +628,7 @@ def _build_app(*, on_execute, tables, notes, initial_query):
     )
 
 
-# ===== SQLRunnerTUI builder (006/007 과 동일 API) =====
+# ===== SQLRunnerTUI builder (005 / 006 와 동일 API) =====
 
 class SQLRunnerTUI:
     """터미널용 풀스크린 SQL 편집기 + 실행자.
