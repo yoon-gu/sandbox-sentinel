@@ -458,29 +458,38 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
         def compose(self) -> ComposeResult:
             with Vertical():
                 yield Static(Text.from_markup(
-                    "[b]단축키[/]\n\n"
-                    "  [yellow]Tab[/]      에디터 → 인라인 추천 리스트로 포커스 이동\n"
-                    "  [yellow]Ctrl+R[/]   ▶ 실행 (현재 SQL 을 on_execute 콜백에 전달)\n"
-                    "  [yellow]F5[/]       ▶ 실행 (Ctrl+R 과 동일)\n"
+                    "[b]에디터 단축키[/]\n\n"
+                    "  [yellow]Tab[/]              들여쓰기 (4 spaces)\n"
+                    "  [yellow]Shift+Tab[/]        들여쓰기 해제 (dedent)\n"
+                    "  [yellow]Ctrl+Space[/]       자동완성 popup (커서 근처)\n"
+                    "  [yellow]Ctrl+R/F5/Ctrl+Enter[/]  ▶ 실행\n\n"
+                    "[b]자동완성 popup (Ctrl+Space)[/]\n\n"
+                    "  • 커서 한 줄 아래에 floating 으로 등장\n"
+                    "  • [yellow]↑↓[/]    후보 이동\n"
+                    "  • [yellow]Tab/Enter[/]  선택 → 인서트 + 닫힘\n"
+                    "  • [yellow]Esc[/]        닫기\n"
+                    "  • popup 떠 있는 동안 글자 입력 → 에디터로 forwarding +\n"
+                    "    popup 갱신 (filter as you type)\n\n"
+                    "[b]앱 단축키[/]\n\n"
                     "  [yellow]Ctrl+T[/]   트리 포커스 (테이블/컬럼 선택)\n"
                     "  [yellow]Ctrl+E[/]   에디터 포커스\n"
                     "  [yellow]Ctrl+L[/]   에디터 비우기\n"
+                    "  [yellow]Ctrl+S[/]   ⬇ CSV 저장 (마지막 결과)\n"
+                    "  [yellow]Ctrl+X[/]   ⬇ Excel 저장 (마지막 결과)\n"
                     "  [yellow]F1[/]       이 도움말\n"
                     "  [yellow]Ctrl+Q[/]   종료\n\n"
-                    "[b]인라인 추천 리스트[/] (에디터 바로 아래)\n\n"
-                    "  • 에디터 입력에 따라 [b]자동 갱신[/] (popup 아님 — 항상 보임)\n"
-                    "  • [yellow]Tab[/]   에디터에서 추천 리스트로 포커스 이동\n"
-                    "  • [yellow]↑↓[/]   추천 후보 사이 이동\n"
-                    "  • [yellow]Enter[/] 선택 → 에디터 커서 위치에 인서트 + 에디터 복귀\n"
-                    "  • [yellow]Esc / Tab[/] 에디터로 복귀 (선택 없이)\n\n"
-                    "[b]트리 사용법[/]\n\n"
-                    "  ↑↓ 이동, Enter 선택 → 에디터 커서 위치에 인서트.\n"
-                    "  테이블 노드 = 테이블명 인서트, 컬럼 노드 = 컬럼명 인서트.\n\n"
-                    "[b]자동완성 정책[/] (005 / 006 과 동일)\n\n"
+                    "[b]결과 DataTable 스크롤[/] (포커스 후)\n\n"
+                    "  [yellow]↑↓[/]              한 행 이동\n"
+                    "  [yellow]PageUp/PageDown[/]  한 페이지 이동\n"
+                    "  [yellow]Ctrl+Home[/]        맨 위 행으로 점프\n"
+                    "  [yellow]Ctrl+End[/]         맨 아래 행으로 점프\n"
+                    "  [yellow]←→[/]              열 이동 (가로 스크롤)\n\n"
+                    "[b]자동완성 정책[/]\n\n"
                     "  • FROM / JOIN 다음 → 테이블\n"
                     "  • SELECT 다음 → 컬럼 + * + 함수\n"
                     "  • WHERE / AND / GROUP BY / ORDER BY 다음 → 컬럼\n"
-                    "  • table_name. 입력 시 → 해당 테이블 컬럼만 한정\n"
+                    "  • table_name. 또는 alias. → 해당 테이블 컬럼만\n"
+                    "  • FROM x AS o, y AS u — alias 자동 인식\n"
                     "  • 어느 위치든 부분입력 (WHE, GR, JOI 등) → 키워드 매치\n\n"
                     "[dim]Esc 또는 Q 로 닫기[/]"
                 ))
@@ -490,12 +499,13 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
         CSS = """
         Screen { layers: base popup; background: $background; }
         #entities { width: 36; border-right: solid $accent; }
-        #editor   { height: 14; border: round $accent; }
+        /* editor : results = 2 : 1  (editor 는 약 2/3, 결과는 1/3) */
+        #editor   { height: 2fr; min-height: 12; border: round $accent; }
         #ctx-label {
             padding: 0 1; height: 3; color: $text-muted;
         }
         #results-label { padding: 0 1; color: $text-muted; }
-        #results  { height: 1fr; border: round $accent; }
+        #results  { height: 1fr; min-height: 6; border: round $accent; }
         """
 
         BINDINGS = [
