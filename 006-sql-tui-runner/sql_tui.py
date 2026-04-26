@@ -462,7 +462,7 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
         #entities { width: 36; border-right: solid $accent; }
         #editor   { height: 14; border: round $accent; }
         #ctx-label {
-            padding: 0 1; height: 1; color: $text-muted;
+            padding: 0 1; height: 3; color: $text-muted;
         }
         #results-label { padding: 0 1; color: $text-muted; }
         #results  { height: 1fr; border: round $accent; }
@@ -622,10 +622,23 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
             }.get(ctx, ctx)
             self._current_sugs = get_suggestions(
                 text, self._tables, full_text=full_text)[:30]
+
+            # 005 처럼 컨텍스트 라벨 아래에 컬러 칩으로 가능한 항목 노출
+            # (정보용 — 클릭/포커스 X, Ctrl+Space 누르면 진짜 popup 뜸)
+            kind_color = {
+                "table": "green", "column": "yellow",
+                "keyword": "cyan", "function": "magenta", "star": "white",
+            }
+            chips: list[str] = []
+            for s in self._current_sugs[:14]:
+                color = kind_color.get(s["kind"], "white")
+                chips.append(f"[{color}]{s['label']}[/]")
+            chips_str = "  ".join(chips) if chips else "[dim](추천 없음)[/]"
+
             self.query_one("#ctx-label", Static).update(Text.from_markup(
-                f"💡 컨텍스트: [bold cyan]{ctx_label}[/]  "
-                f"[dim]· Ctrl+Space 자동완성 · Tab/Enter 선택 · "
-                f"Esc 닫기 · Tab(에디터) 들여쓰기[/]"
+                f"💡 [bold cyan]{ctx_label}[/]  "
+                f"[dim]· Ctrl+Space 자동완성 popup · "
+                f"Tab(에디터) 들여쓰기[/]\n   {chips_str}"
             ))
 
         # ── floating popup 표시 / 숨기기 / 재위치 ──
