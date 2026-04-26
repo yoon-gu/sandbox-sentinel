@@ -134,9 +134,38 @@ def run_checks() -> None:
     print("    python basic_usage.py")
 
 
+def mock_text2sql(prompt: str) -> str:
+    """오프라인 mock — 사내 LLM 미연결 상태에서도 Ctrl+K 채팅 흐름을 체험할
+    수 있게 키워드만 보고 그럴듯한 SQL 을 응답.
+
+    실제 운영에서는 ``on_chat=lambda p: my_llm_client(p)`` 처럼 사내 LLM
+    클라이언트로 교체.
+    """
+    p = prompt.lower()
+    if "유료" in prompt or "paid" in p:
+        return ("paid 사용자 + 매출 합계 SQL 입니다:\n\n"
+                "```sql\n"
+                "SELECT u.name, u.region, SUM(o.amount) AS total\n"
+                "FROM users u JOIN orders o ON o.user_id = u.id\n"
+                "WHERE o.status = 'paid'\n"
+                "GROUP BY u.id ORDER BY total DESC;\n"
+                "```")
+    if "재고" in prompt or "stock" in p:
+        return ("재고 부족 (10 개 미만) 상품 SQL:\n\n"
+                "```sql\n"
+                "SELECT sku, name, stock FROM products\n"
+                "WHERE stock < 10 ORDER BY stock ASC;\n"
+                "```")
+    return ("(mock) 어떤 질문인지 잘 모르겠어요. 사내 LLM 을 연결하면 더 나은\n"
+            "결과를 받을 수 있습니다. 예: SQLRunnerTUI(on_chat=my_llm)\n\n"
+            "샘플 SQL:\n```sql\nSELECT * FROM users LIMIT 5;\n```")
+
+
 def run_tui() -> None:
     db = make_demo_db()
     runner = SQLRunnerTUI.with_sqlite(db)
+    # Ctrl+K 채팅 popup 에 mock text2sql 콜백 연결 (실제로는 사내 LLM 으로 교체)
+    runner.on_chat = mock_text2sql
     # 컬럼 description 보강 (트리 hover · displayText 에 반영)
     runner.add_table("users", [
         {"name": "id",        "type": "INTEGER",   "doc": "PK"},
@@ -174,7 +203,8 @@ def run_tui() -> None:
     ], description="유저 행동 로그")
 
     runner.set_query(
-        "-- Ctrl+R 또는 F5 로 실행 · F1 도움말 · Ctrl+Space 자동완성\n"
+        "-- Ctrl+E / Ctrl+R / F5 실행 · Ctrl+N 자동완성 · Ctrl+/ 주석 · Ctrl+K 채팅(🚧)\n"
+        "-- Ctrl+B 에디터·Ctrl+T 트리·Ctrl+L 비우기·F1 도움말\n"
         "SELECT u.name, u.region, u.plan_type,\n"
         "       COUNT(o.id) AS n_orders,\n"
         "       SUM(o.amount) AS total\n"
