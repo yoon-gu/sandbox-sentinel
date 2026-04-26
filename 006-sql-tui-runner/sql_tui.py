@@ -352,43 +352,67 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
     from textual.widgets.option_list import Option
     from rich.text import Text
 
-    # ── Tab 키를 인라인 추천 리스트 포커스 이동으로 재할당한 TextArea ──
-    # 원래 TextArea 의 Tab = indent. 이걸 "에디터 → 인라인 추천 리스트"
-    # 포커스 이동으로 바꾼다. priority=True 로 부모의 Tab 바인딩 가로챔.
+    # ── TextArea 는 그대로 (Tab 은 indent 기본 동작) ──
+    # Ctrl+Space 만 popup trigger 로 추가. Tab 은 textarea 기본 indent.
     class _SqlTextArea(TextArea):
         BINDINGS = [
-            Binding("tab", "focus_suggest",
-                    description="추천 이동", show=False, priority=True),
+            Binding("ctrl+space", "trigger_popup",
+                    description="자동완성", show=False, priority=True),
         ]
 
-        def action_focus_suggest(self) -> None:
-            try:
-                ol = self.app.query_one("#suggest", _InlineSuggest)
-            except Exception:
-                self.app.bell()
-                return
-            if ol.option_count == 0:
-                self.app.bell()
-                return
-            ol.focus()
-            if ol.highlighted is None or ol.highlighted < 0:
-                ol.highlighted = 0
+        def action_trigger_popup(self) -> None:
+            self.app.action_show_popup()
 
-    # ── 인라인 추천 OptionList ──
-    # 에디터 바로 아래 항상 보이는 리스트. 에디터 입력에 따라 자동 갱신.
-    # Tab 으로 진입 → ↑↓ 이동 → Enter 인서트 → 자동으로 에디터 복귀.
-    # Esc / Tab 으로도 에디터 복귀 (toggle 느낌).
-    class _InlineSuggest(OptionList):
+    # ── 커서 근처에 떠 있는 floating 자동완성 popup ──
+    # 에디터 입력에 따라 자동 표시. Ctrl+Space 로도 수동 호출.
+    # Tab/Enter 로 선택 · Esc/Tab 으로 닫기. 글자 입력 시 에디터로 forwarding.
+    class _CursorPopup(OptionList):
+        DEFAULT_CSS = """
+        _CursorPopup {
+            layer: popup;
+            width: 38;
+            max-height: 9;
+            background: $panel;
+            border: round $primary;
+            display: none;
+        }
+        _CursorPopup.visible {
+            display: block;
+        }
+        """
         BINDINGS = [
-            Binding("escape", "back_to_editor", show=False),
-            Binding("tab",    "back_to_editor", show=False),
+            Binding("escape", "dismiss_popup", show=False),
+            Binding("tab",    "accept_current", show=False),
         ]
 
-        def action_back_to_editor(self) -> None:
-            try:
-                self.app.query_one("#editor", _SqlTextArea).focus()
-            except Exception:
-                pass
+        def action_dismiss_popup(self) -> None:
+            self.app._hide_popup()
+
+        def action_accept_current(self) -> None:
+            if self.option_count and self.highlighted is not None:
+                self.action_select()   # OptionList 내장 — OptionSelected 발화
+
+        def _on_key(self, event) -> None:
+            # 글자 입력 / Backspace 는 에디터로 forwarding 후 popup 새로 채움.
+            # Up/Down/Enter/Tab/Esc/Home/End 등은 popup 키 바인딩 처리.
+            ch = event.character
+            forward = False
+            if ch and len(ch) == 1 and ch.isprintable() and event.key not in (
+                    "up", "down", "left", "right", "enter", "escape", "tab",
+                    "home", "end", "pageup", "pagedown",
+            ):
+                forward = True
+            elif event.key == "backspace":
+                forward = True
+            if forward:
+                ed = self.app.query_one("#editor", _SqlTextArea)
+                ed.focus()
+                if event.key == "backspace":
+                    ed.action_delete_left()
+                else:
+                    ed.insert(ch)
+                event.prevent_default()
+                event.stop()
 
     # ── 도움말 모달 ──
     class _HelpScreen(ModalScreen[None]):
@@ -434,25 +458,21 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
     # ── 메인 App ──
     class SQLRunnerApp(App):
         CSS = """
-        Screen { background: $background; }
+        Screen { layers: base popup; background: $background; }
         #entities { width: 36; border-right: solid $accent; }
         #editor   { height: 14; border: round $accent; }
         #ctx-label {
             padding: 0 1; height: 1; color: $text-muted;
         }
-        #suggest {
-            height: 8; border: round $accent; background: $panel;
-        }
-        #suggest:focus { border: thick $primary; }
-        #suggest.empty { display: none; }
         #results-label { padding: 0 1; color: $text-muted; }
         #results  { height: 1fr; border: round $accent; }
         """
 
         BINDINGS = [
             Binding("ctrl+r,f5",  "run",          "▶ 실행",   priority=True),
-            # Tab 은 _SqlTextArea 서브클래스가 가로채 자동완성으로 변환.
-            # 다른 위젯(Tree 등) 에서는 Tab 이 기본 focus_next 로 동작.
+            # Tab 은 에디터 indent 그대로 (override 안 함).
+            # 자동완성 popup 은 입력 시 자동, 또는 Ctrl+Space 로 수동 트리거.
+            Binding("ctrl+space", "show_popup",   "자동완성", priority=True),
             Binding("ctrl+t",     "focus_tree",   "트리"),
             Binding("ctrl+e",     "focus_editor", "에디터"),
             Binding("ctrl+l",     "clear",        "비우기"),
@@ -498,10 +518,12 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
                         )
                     yield editor
                     yield Static("", id="ctx-label")
-                    yield _InlineSuggest(id="suggest")
                     yield Static("📤 결과 (Ctrl+R 또는 F5 로 실행)",
                                  id="results-label")
                     yield DataTable(id="results", zebra_stripes=True)
+            # 커서 근처에 뜨는 floating 자동완성 popup. 항상 mount 되어 있고
+            # display:none 으로 숨겨짐. _show_popup() 에서 위치+visible 토글.
+            yield _CursorPopup(id="popup")
             yield Footer()
 
         def on_mount(self) -> None:
@@ -550,9 +572,15 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
         def on_text_area_changed(self, event: TextArea.Changed) -> None:
             self._refresh_suggest()
 
-        # 마우스/키로 커서만 이동해도 추천이 갱신되도록 reactive watcher 사용
+        # 마우스/키로 커서만 이동해도 추천이 갱신되도록
         def on_text_area_selection_changed(self, event) -> None:
             self._refresh_suggest()
+            # 커서가 움직이면 popup 도 따라가게. 단, popup 이 보이는 동안 Up/
+            # Down 등으로 popup 내부를 조작 중일 수 있어 popup 이 visible
+            # 이면 위치만 갱신 (focus 빼앗지 않음)
+            popup = self.query_one("#popup", _CursorPopup)
+            if "visible" in popup.classes:
+                self._reposition_popup()
 
         def _refresh_suggest(self) -> None:
             try:
@@ -563,13 +591,28 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
             try:
                 line_idx, col = ed.cursor_location
                 lines = full.split("\n")
-                before_cursor = "\n".join(lines[:line_idx]) + (
-                    ("\n" + lines[line_idx][:col]) if line_idx < len(lines) else "")
                 if line_idx == 0:
                     before_cursor = lines[0][:col] if lines else ""
+                else:
+                    before_cursor = ("\n".join(lines[:line_idx]) + "\n"
+                                     + lines[line_idx][:col]
+                                     if line_idx < len(lines) else full)
             except Exception:
                 before_cursor = full
             self._update_suggest(before_cursor, full_text=full)
+
+            # 사용자가 식별자 글자(영문/숫자/_/.) 를 막 입력했으면 popup 도
+            # 자동으로 띄움 (cursor 위치에). popup 이 이미 떠 있으면 갱신만.
+            if before_cursor:
+                last_ch = before_cursor[-1]
+                if (last_ch.isalnum() or last_ch in "_.") \
+                        and self._current_sugs:
+                    self._show_popup()
+                    return
+            # 식별자가 아니면 popup 자동 닫기
+            popup = self.query_one("#popup", _CursorPopup)
+            if "visible" in popup.classes:
+                self._hide_popup()
 
         def _update_suggest(self, text: str,
                               full_text: Optional[str] = None) -> None:
@@ -580,21 +623,21 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
                 "from_keyword": "FROM", "number": "숫자", "any": "임의",
                 "general": "범용",
             }.get(ctx, ctx)
-
             self._current_sugs = get_suggestions(
                 text, self._tables, full_text=full_text)[:30]
-            ol = self.query_one("#suggest", _InlineSuggest)
-            ol.clear_options()
+            self.query_one("#ctx-label", Static).update(Text.from_markup(
+                f"💡 컨텍스트: [bold cyan]{ctx_label}[/]  "
+                f"[dim]· 식별자 입력 시 자동 popup · Ctrl+Space 수동 호출 · "
+                f"Tab/Enter 선택 · Esc 닫기[/]"
+            ))
 
+        # ── floating popup 표시 / 숨기기 / 재위치 ──
+        def _show_popup(self) -> None:
+            popup = self.query_one("#popup", _CursorPopup)
             if not self._current_sugs:
-                ol.add_class("empty")
-                self.query_one("#ctx-label", Static).update(Text.from_markup(
-                    f"💡 컨텍스트: [bold cyan]{ctx_label}[/]  "
-                    "[dim](추천 없음)[/]"
-                ))
+                self._hide_popup()
                 return
-            ol.remove_class("empty")
-
+            popup.clear_options()
             kind_color = {
                 "table": "green", "column": "yellow",
                 "keyword": "cyan", "function": "magenta", "star": "white",
@@ -603,32 +646,53 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
             for s in self._current_sugs:
                 color = kind_color.get(s["kind"], "white")
                 meta = s.get("meta", "") or ""
-                label = (f"[{color}]{s['label']:<22}[/] "
-                         f"[dim]{s['kind']:<8} {meta}[/]")
-                options.append(Option(Text.from_markup(label)))
-            ol.add_options(options)
+                row = (f"[{color}]{s['label']:<20}[/] "
+                       f"[dim]{s['kind'][:6]} {meta}[/]")
+                options.append(Option(Text.from_markup(row)))
+            popup.add_options(options)
             try:
-                ol.highlighted = 0
+                popup.highlighted = 0
+            except Exception:
+                pass
+            self._reposition_popup()
+            popup.add_class("visible")
+            popup.focus()
+
+        def _reposition_popup(self) -> None:
+            try:
+                ed = self.query_one("#editor", TextArea)
+                popup = self.query_one("#popup", _CursorPopup)
+                off = ed.cursor_screen_offset
+                # 커서 한 줄 아래에 표시 (글자 너비 기준)
+                popup.styles.offset = (off.x, off.y + 1)
             except Exception:
                 pass
 
-            self.query_one("#ctx-label", Static).update(Text.from_markup(
-                f"💡 컨텍스트: [bold cyan]{ctx_label}[/]  "
-                f"[dim]· Tab 추천 이동 · ↑↓ 이동 · Enter 인서트 · "
-                f"Esc 에디터 복귀[/]"
-            ))
+        def _hide_popup(self) -> None:
+            popup = self.query_one("#popup", _CursorPopup)
+            popup.remove_class("visible")
+            try:
+                self.query_one("#editor", _SqlTextArea).focus()
+            except Exception:
+                pass
 
-        # ── 인라인 OptionList Enter → 에디터 커서 위치에 인서트 ──
+        def action_show_popup(self) -> None:
+            """수동 트리거 (Ctrl+Space)."""
+            self._refresh_suggest()
+            if self._current_sugs:
+                self._show_popup()
+
+        # ── popup OptionList 선택 → 에디터 커서 위치에 인서트 ──
         def on_option_list_option_selected(
             self, event: OptionList.OptionSelected
         ) -> None:
-            if event.option_list.id != "suggest":
+            if event.option_list.id != "popup":
                 return
             idx = event.option_index
             if 0 <= idx < len(self._current_sugs):
                 snippet = self._current_sugs[idx]["value"]
                 self._insert_at_cursor(snippet)
-            self.query_one("#editor", _SqlTextArea).focus()
+            self._hide_popup()
 
         # ── 트리 노드 선택 → 에디터 커서 위치에 이름 인서트 ──
         # 테이블 / 컬럼 구분 없이 이름만 단순 인서트.
