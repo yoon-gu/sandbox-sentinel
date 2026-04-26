@@ -235,8 +235,9 @@ $RECYCLE.BIN/
 # chat_ui() 의 [트레이스 저장 & 링크] 버튼이 생성하는 파일
 trace_*.html
 
-# Claude worktrees (transient)
+# Claude worktrees / 스케줄러 (transient)
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 
 # 005/006/007 SQL editor 데모 산출물
 sql_editor_snapshot*.html
@@ -244,3 +245,14 @@ sql_editor_demo*.html
 sql_codemirror_demo*.html
 sql_tui_demo*.db
 *.db
+examples/trace*.html
+**/trace*.html
+
+# browser-demo-automation 산출물 (도구가 생성하는 시연 파일)
+artifacts/
+**/demo.gif
+**/demo.mp4
+
+# 002 sentinel-track 학습 산출 (런타임 생성)
+sentinel_runs/
+**/dashboard.html
