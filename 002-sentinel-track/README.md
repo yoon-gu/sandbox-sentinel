@@ -66,9 +66,9 @@ python -c "import sentinel_track as w; w.build_dashboard('./sentinel_runs', 'das
 `examples/basic_usage.py` 가 torch 없이 바로 돌아가는 최소 예제입니다.
 
 ```bash
-cd 002-sentinel-track
-./.venv/bin/python examples/basic_usage.py
-open dashboard.html   # macOS
+# 리포 루트의 통일 .venv 를 사용 (셋업: 루트 README 참고)
+.venv/bin/python 002-sentinel-track/examples/basic_usage.py
+open 002-sentinel-track/dashboard.html   # macOS
 ```
 
 핵심 API:
@@ -93,8 +93,8 @@ wandb.build_dashboard("./sentinel_runs", "dashboard.html")
 ### (C) 내장 데모 (가장 빠른 체험 경로)
 
 ```bash
-./.venv/bin/python sentinel_track.py demo
-open dashboard.html
+.venv/bin/python 002-sentinel-track/sentinel_track.py demo
+open 002-sentinel-track/dashboard.html
 ```
 
 `demo-classifier` 프로젝트로 3개 run 을 모의 학습한 뒤 대시보드를 만들어줍니다. Sweep 탭에서 `lr` / `optimizer` × `final_loss` / `final_acc` 를 한 번에 비교할 수 있습니다.

@@ -1,27 +1,27 @@
-# 007 - SQL Runner with CodeMirror (인라인 임베드 · 실행 가능)
+# 006 - SQL Runner with CodeMirror (인라인 임베드 · 실행 가능)
 
 > **한 줄 요약**: CodeMirror 5.65.16 을 single-file `.py` 안에 통째로 인라인하여 Jupyter 셀에서 **에디터 자체에 syntax highlight + popup 자동완성** 이 적용되는 SQL Runner. ▶ 실행 (Cmd/Ctrl+Enter) 으로 Python 콜백 호출.
 
 ## 005 / 006 / 007 선택 가이드
 
-| 항목 | 005 (HTML/JS only) | 006 (ipywidgets) | **007 (CodeMirror 인라인)** |
+| 항목 | 005 (HTML/JS only) | **006 (CodeMirror 노트북)** | 007 (Textual TUI) |
 |---|---|---|---|
-| inline popup 자동완성 | ✅ 커서 위치 floating | ❌ Button 칩 | ✅ Ctrl+Space + 자동 popup |
-| 컨텍스트 추천 칩 패널 (popup 외) | ✅ | ✅ | ✅ |
-| 커서 위치 정밀 인서트 | ✅ | ❌ 끝 append | ✅ 정확히 커서 위치 |
-| **에디터 자체** syntax 색 | ❌ | ❌ (별도 미리보기) | ✅ 에디터 내부 컬러링 |
-| line number / 라인 wrap | ❌ | ❌ | ✅ |
+| 환경 | Jupyter 노트북 | Jupyter 노트북 | 터미널 (ssh 친화) |
+| inline popup 자동완성 | ✅ 커서 위치 floating | ✅ Ctrl+Space + 자동 popup | ✅ 인라인 OptionList |
+| 컨텍스트 추천 칩 패널 | ✅ | ✅ | ✅ |
+| 커서 위치 정밀 인서트 | ✅ | ✅ | ✅ |
+| **에디터 자체** syntax 색 | ❌ | ✅ (CM dracula) | ✅ (Textual native, tree-sitter) |
+| line number / 라인 wrap | ❌ | ✅ | ✅ |
 | ▶ 실행 → Python 콜백 | ❌ | ✅ | ✅ |
-| 결과 자동 표 렌더 (모든 컬럼) | ❌ | ✅ | ✅ |
-| 단축키 실행 | ❌ | ❌ | ✅ Cmd/Ctrl+Enter |
-| dracula 다크 테마 | ❌ | (다크 monospace 까지) | ✅ 정식 dracula |
-| 의존성 | IPython | ipywidgets + IPython | ipywidgets + IPython + CM 인라인 |
-| 파일 크기 | ~30KB | ~30KB | **~280KB** (CM 번들 포함) |
-| Trusted notebook 필요 | (script 실행) | 위젯만 동작 | (script 실행) |
+| 결과 자동 표 렌더 (모든 컬럼) | ❌ | ✅ | ✅ DataTable |
+| 단축키 실행 | ❌ | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+R / F5 |
+| 의존성 | IPython | ipywidgets + IPython + CM 인라인 | textual + rich |
+| 파일 크기 | ~30KB | **~285KB** (CM 번들 포함) | ~30KB |
+| Trusted notebook 필요 | (script 실행) | (script 실행 — Trust 필수) | ❌ |
 
-**언제 005 를 쓰나** — 가장 가벼운 단일 파일을 원할 때, 커서 위치 인라인 popup 만 있으면 충분할 때.
-**언제 006 를 쓰나** — 보수적 환경(인라인 `<script>` 차단) 에서도 ipywidgets 만으로 동작이 필요할 때.
-**언제 007 을 쓰나** — 진짜 IDE 같은 편집 체감(에디터 내부 syntax color · 라인 번호 · Ctrl+Space) 이 필요하고, 270KB 단일 파일과 trusted notebook 환경이 허용될 때.
+**언제 005 를 쓰나** — 가장 가벼운 단일 파일, JS-only 로 충분할 때 (Python 콜백 호출 불필요).
+**언제 006 를 쓰나** — 노트북 안에서 진짜 IDE 같은 편집 체감(에디터 내부 syntax color · 라인 번호 · Ctrl+Space) 이 필요할 때.
+**언제 007 을 쓰나** — ssh / 원격 터미널 친화, Trusted notebook 정책이 부담스럽거나 가장 가벼운 단일 파일을 원할 때.
 
 ## 원본 출처
 
@@ -169,7 +169,7 @@ runner.show()
 ## 파일 구조
 
 ```
-007-sql-codemirror-runner/
+006-sql-codemirror-runner/
 ├── README.md
 ├── sql_codemirror.py        # ⭐ single-file 반입 단위 (~270KB, CM 인라인 포함)
 ├── metadata.json
@@ -204,10 +204,10 @@ runner.show()
 
 ## 알려진 제약 / 한계
 
-- **Trusted notebook 필요** — JupyterLab 의 untrusted 노트북에서는 인라인 `<script>` 가 차단되어 CodeMirror 가 mount 되지 않음 (`File → Trust Notebook`). 이 환경 제약이 부담이라면 **006 사용 권장** (ipywidgets 만으로 동작).
-- **파일 크기 ~270KB** — 005/006(각 ~30KB) 보다 약 9배. 보안 검토 분량이 늘어남. 다만 **CodeMirror MIT 라이선스 한 건만 추가 검토** 하면 끝.
+- **Trusted notebook 필요** — JupyterLab 의 untrusted 노트북에서는 인라인 `<script>` 가 차단되어 CodeMirror 가 mount 되지 않음 (`File → Trust Notebook`). 이 환경 제약이 부담이라면 **005 (HTML/JS only)** 또는 **007 (TUI)** 사용 권장.
+- **파일 크기 ~285KB** — 005(~30KB) 보다 약 9배. 보안 검토 분량이 늘어남. 다만 **CodeMirror MIT 라이선스 한 건만 추가 검토** 하면 끝.
 - **CodeMirror 5 (legacy)** — v6 가 아닌 v5 를 의도적으로 선택. v6 는 ESM 번들러(rollup/esbuild) 가 필요해 raw-string 인라인이 사실상 불가. v5 는 단일 IIFE 번들이라 인라인 적합. v5 는 유지보수 모드지만 SQL 모드/show-hint 만 쓰는 본 용도엔 충분.
-- **CTE / 서브쿼리 경계 부정확** — 005/006 와 동일하게 간이 토큰 분리. 복잡한 쿼리에선 추천이 어색할 수 있음.
+- **CTE / 서브쿼리 경계 부정확** — 005 와 동일하게 간이 토큰 분리. 복잡한 쿼리에선 추천이 어색할 수 있음.
 - **comm channel 비공개 사용** — CM 의 변경값을 hidden ipywidgets.Textarea 의 native `input` 이벤트로 동기화. 향후 ipywidgets 가 내부 동기 메커니즘을 변경하면 깨질 수 있음 (현재 v7 / v8 까지 안정).
 - **CodeMirror v5 EOL 주시** — 보안 패치는 들어오지만 새 기능은 v6 로만 추가됨. 본 변환물은 SQL 자동완성/하이라이트만 쓰므로 큰 영향 없음.
 
@@ -216,10 +216,11 @@ runner.show()
 `_assets/` 의 자산을 갱신하거나 wrapper 코드를 수정한 후 단일 파일을 재생성:
 
 ```bash
-cd 007-sql-codemirror-runner
-python _build.py
+# 리포 루트의 통일 .venv 를 사용
+cd 006-sql-codemirror-runner
+../.venv/bin/python _build.py
 # → sql_codemirror.py 가 갱신됨
-python sql_codemirror.py        # 자체 self-check (번들 크기 등)
+../.venv/bin/python sql_codemirror.py    # 자체 self-check (번들 크기 등)
 ```
 
 `_assets/` 의 minified 파일은 [jsdelivr CDN](https://cdn.jsdelivr.net/npm/codemirror@5.65.16/) 등에서 받아 두면 됩니다 (빌드 시점 1회만 외부 네트워크 필요, 산출물에는 흔적 없음).

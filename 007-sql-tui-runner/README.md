@@ -1,25 +1,25 @@
-# 008 - SQL Runner TUI (Textual · 터미널 풀스크린 · 실행 가능)
+# 007 - SQL Runner TUI (Textual · 터미널 풀스크린 · 실행 가능)
 
-> **한 줄 요약**: 터미널 풀스크린에서 동작하는 single-file SQL 편집기 + 실행기. Textual TextArea 의 native SQL syntax highlight 로 **에디터 자체에 색이 입혀지고**, Ctrl+Space 자동완성 popup, Ctrl+R 실행, DataTable 결과 — 모두 터미널 안에서.
+> **한 줄 요약**: 터미널 풀스크린에서 동작하는 single-file SQL 편집기 + 실행기. Textual TextArea 의 native SQL syntax highlight 로 **에디터 자체에 색이 입혀지고**, Tab 자동완성 (인라인 OptionList), Ctrl+R 실행, DataTable 결과 — 모두 터미널 안에서.
 
-## 005 / 006 / 007 / 008 한눈에 비교
+## 005 / 006 / 007 한눈에 비교
 
-| 항목 | 005 (HTML/JS) | 006 (ipywidgets) | 007 (CodeMirror) | **008 (Textual TUI)** |
-|---|---|---|---|---|
-| 환경 | Jupyter 노트북 | Jupyter 노트북 | Jupyter 노트북 | **터미널** (ssh OK) |
-| 브라우저 / Trust 필요 | ✅ / (script 실행) | ✅ / 위젯만 | ✅ / **Trust 필수** | ❌ |
-| **에디터 자체** syntax 색 | ❌ | ❌ (별도 미리보기) | ✅ CodeMirror | ✅ Textual native (tree-sitter SQL 번들) |
-| inline popup 자동완성 | ✅ floating | ❌ Button 칩 | ✅ Ctrl+Space | ✅ Ctrl+Space (ModalScreen) |
-| 컨텍스트 추천 칩 | ✅ | ✅ | ✅ | ✅ (하단 라인) |
-| 커서 위치 정밀 인서트 | ✅ | ❌ 끝 append | ✅ | ✅ (마지막 부분 단어 치환) |
-| ▶ 실행 → Python 콜백 | ❌ | ✅ | ✅ | ✅ Ctrl+R / F5 |
-| 결과 자동 표 렌더 | ❌ | ✅ pandas HTML | ✅ pandas HTML | ✅ Textual DataTable |
-| 단축키 실행 | ❌ | ❌ | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+R / F5 |
-| 의존성 | IPython | ipywidgets+IPython | ipywidgets+IPython | **textual + rich** |
-| 파일 크기 | ~30KB | ~30KB | ~280KB | **~25KB** |
+| 항목 | 005 (HTML/JS) | 006 (CodeMirror 노트북) | **007 (Textual TUI)** |
+|---|---|---|---|
+| 환경 | Jupyter 노트북 | Jupyter 노트북 | **터미널** (ssh OK) |
+| 브라우저 / Trust 필요 | ✅ / (script 실행) | ✅ / **Trust 필수** | ❌ |
+| **에디터 자체** syntax 색 | ❌ | ✅ CodeMirror | ✅ Textual native (tree-sitter SQL) |
+| inline 자동완성 | ✅ floating popup | ✅ Ctrl+Space popup | ✅ 인라인 OptionList (Tab) |
+| 컨텍스트 추천 패널 | ✅ | ✅ | ✅ |
+| 커서 위치 정밀 인서트 | ✅ | ✅ | ✅ |
+| ▶ 실행 → Python 콜백 | ❌ | ✅ | ✅ Ctrl+R / F5 |
+| 결과 자동 표 렌더 | ❌ | ✅ pandas HTML | ✅ Textual DataTable |
+| 단축키 실행 | ❌ | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+R / F5 |
+| 의존성 | IPython | ipywidgets+IPython | **textual + rich** |
+| 파일 크기 | ~30KB | ~285KB | **~25KB** |
 
-**언제 008 을 쓰나** — ssh / 원격 터미널에서 일할 때, JupyterLab 띄우기 부담스러울 때, Trust 정책으로 인라인 `<script>` 가 막힌 환경, 가장 가벼운 단일 파일을 원할 때.
-**여전히 노트북이 좋을 때** — 결과를 다음 셀로 넘겨 후속 분석을 이어가야 할 때 (008 은 결과를 DataTable 안에서만 봄), pandas DataFrame 의 풍부한 HTML repr 가 필요할 때.
+**언제 007 을 쓰나** — ssh / 원격 터미널에서 일할 때, JupyterLab 띄우기 부담스러울 때, Trust 정책으로 인라인 `<script>` 가 막힌 환경, 가장 가벼운 단일 파일을 원할 때.
+**여전히 노트북이 좋을 때** — 결과를 다음 셀로 넘겨 후속 분석을 이어가야 할 때 (007 은 결과를 DataTable 안에서만 봄), pandas DataFrame 의 풍부한 HTML repr 가 필요할 때.
 
 ## 원본 출처
 
@@ -149,7 +149,7 @@ runner.add_table("users", [
 ## 파일 구조
 
 ```
-008-sql-tui-runner/
+007-sql-tui-runner/
 ├── README.md
 ├── sql_tui.py             # ⭐ single-file (~25KB)
 ├── metadata.json
@@ -161,14 +161,16 @@ runner.add_table("users", [
 ## 실행 방법
 
 ```bash
+# 리포 루트의 통일 .venv 를 사용 (셋업: 루트 README 참고)
+
 # CLI 단위 검증 (TUI 띄우지 않고 detect_context/get_suggestions 만)
-python examples/basic_usage.py --check
+.venv/bin/python 007-sql-tui-runner/examples/basic_usage.py --check
 
 # 풀스크린 TUI 진입 (4 테이블, ~5명 사용자, 6건 주문 데모)
-python examples/basic_usage.py
+.venv/bin/python 007-sql-tui-runner/examples/basic_usage.py
 
 # 또는 sql_tui.py 자체에 들어있는 단순 데모
-python sql_tui.py
+.venv/bin/python 007-sql-tui-runner/sql_tui.py
 ```
 
 ## 폐쇄망 친화 체크
@@ -184,7 +186,7 @@ python sql_tui.py
 
 ## 알려진 제약 / 한계
 
-- **결과 후속 분석이 어려움** — DataTable 에 표시된 결과를 별도 셀로 넘기기 어려움. 이게 필요하면 006/007 (노트북) 사용 권장.
+- **결과 후속 분석이 어려움** — DataTable 에 표시된 결과를 별도 셀로 넘기기 어려움. 이게 필요하면 006 (CodeMirror 노트북) 사용 권장.
 - **터미널 너비 제약** — 컬럼이 많으면 가로 스크롤이 필요. Textual DataTable 은 가로 스크롤 지원하지만 폰트가 좁은 환경에서 가독성 떨어짐.
 - **마우스 동작 환경 의존** — JupyterLab 의 터미널, ssh 터미널, iTerm2/Terminal.app 등 환경에 따라 마우스 클릭 동작이 다를 수 있음. 키보드만으로 모든 조작 가능하니 마우스가 안 되면 단축키 사용.
 - **textual native SQL highlight** — Textual 6.11.0 의 TextArea 는 SQL 을 native bundled language 로 지원 (tree-sitter SQL 그래머 포함). 만약 stripped 빌드라 SQL 이 빠지면 plain text 로 fall back 됨.

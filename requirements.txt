@@ -1,0 +1,42 @@
+# sandbox-sentinel — 통일 개발 환경 (Python 3.11)
+#
+# 리포 루트의 단일 .venv 가 7개 변환물(001~007) 의 개발/시연을 모두 커버합니다.
+# 폐쇄망 환경에서는 environment-adapter Skill 의 stacks/default.yaml 정책에
+# 맞춰 사내 미러 등록본을 사용하세요.
+#
+# 셋업:
+#   /opt/homebrew/bin/python3.11 -m venv .venv
+#   .venv/bin/pip install -r requirements.txt
+#   .venv/bin/pip install --no-deps textual==6.11.0   # ⚠ 스택 정책: --no-deps 필수
+#
+# 검증:
+#   .venv/bin/python --version    # 3.11.x
+#   .venv/bin/python -c "import langgraph, textual, ipywidgets; print('ok')"
+
+# ===== 표준 DS 스택 =====
+numpy
+pandas
+
+# ===== Jupyter 노트북 변환물 (001/005/006) =====
+jupyterlab
+ipywidgets
+
+# ===== LangGraph / LangChain 생태계 (001/003/004) =====
+langgraph==1.0.10
+langchain==1.2.10
+
+# ===== 터미널 UI =====
+# textual 은 --no-deps 로 별도 설치 필요 (위 셋업 절차 참고)
+# textual==6.11.0
+rich
+prompt_toolkit
+
+# ===== 변환물별 보조 =====
+psutil                # 002-sentinel-track
+tree-sitter           # 007-sql-tui-runner (에디터 syntax highlight)
+tree-sitter-sql
+
+# ===== 의도적 제외 =====
+# torch / transformers — 002 의 hf_trainer_demo 만 필요. ~5GB 라 통일 venv 에서 빼고,
+# 사용 시 별도 설치:
+#   .venv/bin/pip install torch==2.4.0 transformers==4.49.0 huggingface-hub==0.25.5
