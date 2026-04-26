@@ -91,10 +91,41 @@ _ANCHORS = {
 }
 
 
-# ===== 컨텍스트 감지 + 추천 (005 정책) =====
+# ===== 타입 단축 (005 와 동일 매핑) =====
+
+def _short_type(t: str) -> str:
+    """SQL 타입명을 짧은 이모지로 단축."""
+    if not t:
+        return ""
+    u = t.upper()
+    if "INT" in u or "SERIAL" in u:
+        return "🔢"
+    if any(k in u for k in ("REAL", "FLOAT", "DOUBLE", "NUMERIC",
+                             "DECIMAL", "MONEY")):
+        return "📊"
+    if any(k in u for k in ("CHAR", "TEXT", "STRING", "CLOB")):
+        return "📝"
+    if any(k in u for k in ("TIMESTAMP", "DATE", "TIME")):
+        return "📅"
+    if "BOOL" in u:
+        return "✓"
+    if any(k in u for k in ("BLOB", "BINARY", "BYTEA")):
+        return "📦"
+    if "JSON" in u:
+        return "🧬"
+    if "UUID" in u:
+        return "🆔"
+    return u[:1] or "?"
+
+
+# ===== 컨텍스트 감지 + 추천 (005 와 동일 정책) =====
 
 def detect_context(text: str) -> str:
-    """직전 anchor 키워드로 추천 종류를 결정."""
+    """직전 anchor 키워드로 추천 종류를 결정.
+
+    weak anchor (`AS` / `WITH` / `VALUES`) 는 콤마를 지나친 뒤에는
+    건너뛰고 더 깊은 clause anchor(SELECT 등)를 찾는다.
+    """
     s = re.sub(r"--[^\n]*", " ", text)
     s = re.sub(r"/\*.*?\*/", " ", s, flags=re.DOTALL)
     s = re.sub(r"'[^']*'", " ", s)
@@ -102,11 +133,18 @@ def detect_context(text: str) -> str:
     tokens = s.split()
     if not tokens:
         return "start"
+    WEAK = {"AS", "WITH", "VALUES"}
+    seen_comma = False
     last = None
     last_idx = -1
     for i in range(len(tokens) - 1, -1, -1):
-        tu = tokens[i].upper()
+        tok = tokens[i]
+        if "," in tok:
+            seen_comma = True
+        tu = tok.upper()
         if tu in _ANCHORS:
+            if tu in WEAK and seen_comma:
+                continue
             last = tu
             last_idx = i
             break
@@ -133,24 +171,99 @@ def detect_context(text: str) -> str:
     return MAP.get(last, "general")
 
 
-def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
-    """현재 컨텍스트에 맞는 추천 후보 리스트 (텍스트 끝 기준)."""
+# ===== 테이블 alias 추출 (005 와 동일 정책) =====
+
+_NOT_ALIAS = {
+    "WHERE", "ON", "GROUP", "ORDER", "HAVING", "LIMIT", "JOIN",
+    "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "UNION",
+    "EXCEPT", "INTERSECT", "AS", "USING", "SET", "VALUES",
+}
+_CLAUSE_END_RE = re.compile(
+    r"\b(?:WHERE|GROUP|ORDER|HAVING|LIMIT|JOIN|INNER|LEFT|RIGHT|FULL"
+    r"|OUTER|CROSS|UNION|EXCEPT|INTERSECT|ON|USING)\b",
+    re.IGNORECASE,
+)
+_TABLE_REF_RE = re.compile(
+    r"^\s*(\w+(?:\.\w+)?)\s*(?:(?:AS\s+)?(\w+))?\s*$",
+    re.IGNORECASE,
+)
+_FROM_RE = re.compile(r"\bFROM\b", re.IGNORECASE)
+_JOIN_RE = re.compile(
+    r"\bJOIN\s+(\w+(?:\.\w+)?)(?:\s+(?:AS\s+)?(\w+))?",
+    re.IGNORECASE,
+)
+
+
+def extract_aliases(text: str, tables: Mapping[str, list]) -> dict:
+    """``FROM <t> [AS] <alias>`` / ``JOIN <t> [AS] <alias>`` 스캔.
+
+    지원: 콤마 join (`FROM x, y`), schema-qualified (`public.t AS o`),
+    본명 자체 매핑 (`orders → orders` / `o → orders`).
+    """
+    s = re.sub(r"--[^\n]*", " ", text)
+    s = re.sub(r"/\*.*?\*/", " ", s, flags=re.DOTALL)
+    s = re.sub(r"'[^']*'", " ", s)
+    s = re.sub(r'"[^"]*"', " ", s)
+    aliases: dict = {}
+
+    def _register(tname_full: str, alias: Optional[str]) -> None:
+        tname = tname_full.split(".")[-1]
+        if tname not in tables:
+            return
+        aliases[tname] = tname
+        if alias and alias.upper() not in _NOT_ALIAS:
+            aliases[alias] = tname
+
+    for m in _FROM_RE.finditer(s):
+        rest = s[m.end():]
+        end_m = _CLAUSE_END_RE.search(rest)
+        from_clause = rest[:end_m.start()] if end_m else rest
+        for part in from_clause.split(","):
+            part = part.strip().rstrip(";").strip()
+            if not part:
+                continue
+            tm = _TABLE_REF_RE.match(part)
+            if not tm:
+                continue
+            _register(tm.group(1), tm.group(2))
+    for m in _JOIN_RE.finditer(s):
+        _register(m.group(1), m.group(2))
+    return aliases
+
+
+def get_suggestions(text: str, tables: Mapping[str, list],
+                     full_text: Optional[str] = None) -> list:
+    """현재 컨텍스트에 맞는 추천 후보 리스트.
+
+    Args:
+        text: cursor 까지의 텍스트 (컨텍스트 감지 + 마지막 부분 단어).
+        tables: 스키마 매핑.
+        full_text: 전체 SQL. alias 추출에 사용. None 이면 ``text``.
+            SELECT 절(FROM 보다 앞)에서도 alias 가 잡히려면 전체 텍스트
+            전달 필요.
+    """
     ctx = detect_context(text)
     m = re.search(r"([\w_.]+)$", text)
     last_word = m.group(1) if m else ""
     last_lower = last_word.lower()
 
+    # table_or_alias. qualifier 우선
     if "." in last_word:
         dot_idx = last_word.index(".")
-        tname = last_word[:dot_idx]
+        qual = last_word[:dot_idx]
         col_prefix = last_word[dot_idx + 1:].lower()
-        if tname in tables:
+        aliases = extract_aliases(
+            full_text if full_text is not None else text, tables
+        )
+        real = aliases.get(qual)
+        if real and real in tables:
             return [
-                {"value": f"{tname}.{c['name']}",
-                 "label": c["name"],
+                {"value": f"{qual}.{c['name']}",
+                 "label": (f"{c['name']} {_short_type(c.get('type',''))}"
+                           if c.get("type") else c["name"]),
                  "kind": "column",
-                 "meta": c.get("type", "") or tname}
-                for c in tables[tname]
+                 "meta": c.get("type", "") or real}
+                for c in tables[real]
                 if c["name"].lower().startswith(col_prefix)
             ][:30]
 
@@ -166,8 +279,12 @@ def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
                 if c["name"] in seen:
                     continue
                 seen.add(c["name"])
-                meta = (c.get("type", "") + " · " if c.get("type") else "") + tname
-                cands.append({"value": c["name"], "label": c["name"],
+                type_str = c.get("type", "") or ""
+                # 005 와 동일 — 컬럼 라벨에 짧은 타입 이모지 부착
+                col_label = (f"{c['name']} {_short_type(type_str)}"
+                              if type_str else c["name"])
+                meta = (type_str + " · " if type_str else "") + tname
+                cands.append({"value": c["name"], "label": col_label,
                               "kind": "column", "meta": meta})
     if ctx == "columns_or_star":
         cands.insert(0, {"value": "*", "label": "*",
@@ -181,7 +298,7 @@ def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
         cands.append({"value": "FROM", "label": "FROM",
                       "kind": "keyword", "meta": "kw"})
 
-    # KEYWORDS / FUNCTIONS fallback (어느 컨텍스트에서도 부분입력 매치)
+    # KEYWORDS / FUNCTIONS fallback
     seen_v = {c["value"] for c in cands}
     for kw in _KEYWORDS:
         if kw not in seen_v:
@@ -219,7 +336,7 @@ def _normalize_column(c: ColumnSpec) -> dict:
 # ===== Textual TUI =====
 # (textual 은 lazy import — 헤드리스 단위 검증에서도 모듈 import 자체는 가능)
 
-def _build_app(*, on_execute, tables, notes, initial_query):
+def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
     """SQLRunnerTUI.run() 시점에 textual 을 import 하고 App 클래스를 동적 구성.
 
     이 패턴은 basic_usage.py 처럼 textual 을 띄우지 않는 단위
@@ -339,17 +456,24 @@ def _build_app(*, on_execute, tables, notes, initial_query):
             Binding("ctrl+t",     "focus_tree",   "트리"),
             Binding("ctrl+e",     "focus_editor", "에디터"),
             Binding("ctrl+l",     "clear",        "비우기"),
+            Binding("ctrl+s",     "save_csv",     "⬇ CSV"),
+            Binding("ctrl+x",     "save_xlsx",    "⬇ Excel",  priority=True),
             Binding("f1",         "help",         "도움말"),
             Binding("ctrl+q",     "quit",         "종료",     priority=True),
         ]
 
-        def __init__(self, *, on_execute, tables, notes, initial_query):
+        def __init__(self, *, on_execute, tables, notes, initial_query,
+                     app_state):
             super().__init__()
             self.on_execute = on_execute
             self._tables = tables
             self._notes = notes
             self._initial_query = initial_query
             self._current_sugs: list = []   # 인라인 OptionList ↔ 인덱스 매핑
+            # SQLRunnerTUI 가 소유한 dict — last_query/last_result/last_error/
+            # history 가 들어있다. App 종료 후에도 사용자가 runner.last_result
+            # 로 접근 가능하도록 외부 dict 를 그대로 mutate.
+            self.app_state = app_state
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
@@ -420,11 +544,35 @@ def _build_app(*, on_execute, tables, notes, initial_query):
             # 에디터에 초기 포커스
             self.query_one("#editor", TextArea).focus()
 
-        # ── 에디터 텍스트 변경 → 인라인 추천 갱신 ──
+        # ── 에디터 텍스트 변경 또는 커서 이동 → 인라인 추천 갱신 ──
+        # 005 처럼 커서 위치를 반영하려고 cursor_location 까지의 텍스트를
+        # 컨텍스트 감지에 사용. 전체 SQL 은 alias 추출에 사용.
         def on_text_area_changed(self, event: TextArea.Changed) -> None:
-            self._update_suggest(event.text_area.text)
+            self._refresh_suggest()
 
-        def _update_suggest(self, text: str) -> None:
+        # 마우스/키로 커서만 이동해도 추천이 갱신되도록 reactive watcher 사용
+        def on_text_area_selection_changed(self, event) -> None:
+            self._refresh_suggest()
+
+        def _refresh_suggest(self) -> None:
+            try:
+                ed = self.query_one("#editor", TextArea)
+            except Exception:
+                return
+            full = ed.text
+            try:
+                line_idx, col = ed.cursor_location
+                lines = full.split("\n")
+                before_cursor = "\n".join(lines[:line_idx]) + (
+                    ("\n" + lines[line_idx][:col]) if line_idx < len(lines) else "")
+                if line_idx == 0:
+                    before_cursor = lines[0][:col] if lines else ""
+            except Exception:
+                before_cursor = full
+            self._update_suggest(before_cursor, full_text=full)
+
+        def _update_suggest(self, text: str,
+                              full_text: Optional[str] = None) -> None:
             ctx = detect_context(text)
             ctx_label = {
                 "start": "시작", "tables": "테이블", "columns": "컬럼",
@@ -433,7 +581,8 @@ def _build_app(*, on_execute, tables, notes, initial_query):
                 "general": "범용",
             }.get(ctx, ctx)
 
-            self._current_sugs = get_suggestions(text, self._tables)[:30]
+            self._current_sugs = get_suggestions(
+                text, self._tables, full_text=full_text)[:30]
             ol = self.query_one("#suggest", _InlineSuggest)
             ol.clear_options()
 
@@ -522,6 +671,9 @@ def _build_app(*, on_execute, tables, notes, initial_query):
             label = self.query_one("#results-label", Static)
             table.clear(columns=True)
 
+            # runner 객체에 마지막 실행 SQL 기록 (실패해도 query 는 남김)
+            self.app_state["last_query"] = sql
+
             if not sql.strip():
                 label.update("[red]⚠ SQL 이 비어있습니다[/]")
                 return
@@ -538,8 +690,66 @@ def _build_app(*, on_execute, tables, notes, initial_query):
                 label.update(
                     f"[red]❌ {type(e).__name__}: {e}[/]"
                 )
+                self.app_state["last_error"] = e
+                self.app_state["last_result"] = None
+                self.app_state["history"].append(
+                    {"query": sql, "result": None, "error": e})
                 return
+            self.app_state["last_error"] = None
+            self.app_state["last_result"] = result
+            self.app_state["history"].append(
+                {"query": sql, "result": result, "error": None})
             self._render_result(result, label, table)
+
+        # ── ⬇ CSV / Excel 저장 (마지막 실행 결과를 파일로) ──
+        def action_save_csv(self) -> None:
+            self._save_result("csv")
+
+        def action_save_xlsx(self) -> None:
+            self._save_result("xlsx")
+
+        def _save_result(self, fmt: str) -> None:
+            import datetime, os
+            res = self.app_state.get("last_result")
+            if res is None:
+                self.notify("⚠ 다운로드할 결과가 없습니다. ▶ 실행 후 시도하세요.",
+                            severity="warning")
+                return
+            try:
+                import pandas as pd
+            except ImportError:
+                self.notify("⚠ pandas 미설치 — CSV/Excel 저장은 pandas 필요.",
+                            severity="error")
+                return
+            df = res
+            if isinstance(df, list) and df and isinstance(df[0], dict):
+                df = pd.DataFrame(df)
+            if not isinstance(df, pd.DataFrame):
+                self.notify(f"⚠ 결과가 DataFrame/list[dict] 형식이 아니라 저장 불가 "
+                            f"(type={type(res).__name__}).", severity="warning")
+                return
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            fname = f"sql_result_{ts}.{fmt}"
+            path = os.path.abspath(fname)
+            try:
+                if fmt == "csv":
+                    df.to_csv(path, index=False, encoding="utf-8-sig")
+                else:
+                    try:
+                        df.to_excel(path, index=False, engine="openpyxl")
+                    except (ImportError, ValueError):
+                        self.notify("⚠ Excel 엔진 (openpyxl) 미설치. CSV 사용 권장.",
+                                    severity="error")
+                        return
+            except Exception as e:
+                self.notify(f"❌ {type(e).__name__}: {e}", severity="error")
+                return
+            self.notify(
+                f"✓ {fname} 저장 ({len(df)} rows × {len(df.columns)} cols)\n"
+                f"  → {path}",
+                severity="information",
+                timeout=5,
+            )
 
         def _render_result(self, result, label, table) -> None:
             from rich.markup import escape as rich_escape
@@ -624,6 +834,9 @@ def _build_app(*, on_execute, tables, notes, initial_query):
         tables=tables,
         notes=notes,
         initial_query=initial_query,
+        app_state=(app_state if app_state is not None
+                   else {"last_query": None, "last_result": None,
+                         "last_error": None, "history": []}),
     )
 
 
@@ -644,6 +857,38 @@ class SQLRunnerTUI:
         self.notes: dict[str, str] = {}
         self.initial_query: str = ""
         self.on_execute = on_execute
+
+        # 후속 분석을 위한 실행 상태 (App 종료 후에도 runner.last_result 등으로
+        # 접근 가능). App 이 같은 dict 를 mutate.
+        self._state: dict = {
+            "last_query": None,
+            "last_result": None,
+            "last_error": None,
+            "history": [],
+        }
+
+    # ----- runner 객체에 노출되는 후속 분석 attribute -----
+
+    @property
+    def last_query(self) -> Optional[str]:
+        return self._state["last_query"]
+
+    @property
+    def last_result(self) -> Any:
+        return self._state["last_result"]
+
+    @property
+    def last_error(self) -> Optional[BaseException]:
+        return self._state["last_error"]
+
+    @property
+    def history(self) -> list:
+        return self._state["history"]
+
+    @property
+    def result(self) -> Any:
+        """last_result alias."""
+        return self._state["last_result"]
 
     @classmethod
     def with_sqlite(cls, db_path: str) -> "SQLRunnerTUI":
@@ -719,12 +964,17 @@ class SQLRunnerTUI:
         return self
 
     def run(self) -> None:
-        """풀스크린 TUI 진입. 종료 시 정상 반환."""
+        """풀스크린 TUI 진입. 종료 시 정상 반환.
+
+        TUI 종료 후에도 ``runner.last_query`` / ``runner.last_result``
+        / ``runner.history`` 로 마지막 실행 상태에 접근 가능.
+        """
         app = _build_app(
             on_execute=self.on_execute,
             tables=self.tables,
             notes=self.notes,
             initial_query=self.initial_query,
+            app_state=self._state,   # App 이 같은 dict 를 mutate
         )
         app.run()
 
