@@ -154,35 +154,73 @@ def detect_context(text: str) -> str:
     return MAP.get(last, "general")
 
 
-_ALIAS_RE = re.compile(
-    r"\b(?:FROM|JOIN)\s+(\w+)(?:\s+(?:AS\s+)?(\w+))?",
-    re.IGNORECASE,
-)
-# alias 위치에 와도 alias 가 아닌 reserved keyword 들 (예: "FROM orders WHERE..."
-# 의 WHERE 가 alias 로 잡히는 걸 막기 위해)
+# alias 위치에 와도 alias 가 아닌 reserved keyword 들
 _NOT_ALIAS = {
     "WHERE", "ON", "GROUP", "ORDER", "HAVING", "LIMIT", "JOIN",
     "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "UNION",
     "EXCEPT", "INTERSECT", "AS", "USING", "SET", "VALUES",
 }
+# FROM clause 끝을 알리는 키워드 (이 키워드가 나오면 더 이상 콤마 list 안 봄)
+_CLAUSE_END_RE = re.compile(
+    r"\b(?:WHERE|GROUP|ORDER|HAVING|LIMIT|JOIN|INNER|LEFT|RIGHT|FULL"
+    r"|OUTER|CROSS|UNION|EXCEPT|INTERSECT|ON|USING)\b",
+    re.IGNORECASE,
+)
+# 한 항목 ('schema.table AS alias' / 'table alias' / 'table' 모두 허용)
+_TABLE_REF_RE = re.compile(
+    r"^\s*(\w+(?:\.\w+)?)\s*(?:(?:AS\s+)?(\w+))?\s*$",
+    re.IGNORECASE,
+)
+_FROM_RE = re.compile(r"\bFROM\b", re.IGNORECASE)
+_JOIN_RE = re.compile(
+    r"\bJOIN\s+(\w+(?:\.\w+)?)(?:\s+(?:AS\s+)?(\w+))?",
+    re.IGNORECASE,
+)
 
 
 def extract_aliases(text: str, tables: Mapping[str, list]) -> dict:
-    """``FROM <t> [AS] <alias>``, ``JOIN <t> [AS] <alias>`` 를 스캔해
-    ``alias → real_table`` 매핑을 반환. 본명 그대로도 자기 자신에 매핑."""
+    """``FROM <t> [AS] <alias>``, ``JOIN <t> [AS] <alias>`` 스캔.
+
+    지원하는 패턴:
+      · ``FROM orders``, ``FROM orders o``, ``FROM orders AS o``
+      · ``FROM orders o, users u`` (콤마 join — 두 번째 이후도 인식)
+      · ``FROM public.orders AS o`` (schema-qualified — 마지막 segment 만)
+      · ``JOIN events AS e``, ``JOIN public.events e`` (스키마 포함)
+    본명도 자기 자신에 매핑되어 'orders.' / 'o.' 둘 다 동작.
+    """
     s = re.sub(r"--[^\n]*", " ", text)
     s = re.sub(r"/\*.*?\*/", " ", s, flags=re.DOTALL)
     s = re.sub(r"'[^']*'", " ", s)
     s = re.sub(r'"[^"]*"', " ", s)
     aliases: dict = {}
-    for m in _ALIAS_RE.finditer(s):
-        tname = m.group(1)
-        alias = m.group(2)
+
+    def _register(tname_full: str, alias: Optional[str]) -> None:
+        # schema-qualified 면 마지막 segment 사용
+        tname = tname_full.split(".")[-1]
         if tname not in tables:
-            continue
-        aliases[tname] = tname    # 본명 자체도 등록
+            return
+        aliases[tname] = tname
         if alias and alias.upper() not in _NOT_ALIAS:
             aliases[alias] = tname
+
+    # FROM clause — 다음 절 키워드 전까지 잘라 콤마 list 처리
+    for m in _FROM_RE.finditer(s):
+        rest = s[m.end():]
+        end_m = _CLAUSE_END_RE.search(rest)
+        from_clause = rest[:end_m.start()] if end_m else rest
+        for part in from_clause.split(","):
+            part = part.strip().rstrip(";").strip()
+            if not part:
+                continue
+            tm = _TABLE_REF_RE.match(part)
+            if not tm:
+                continue
+            _register(tm.group(1), tm.group(2))
+
+    # JOIN — 단일 테이블 (콤마 list 아님)
+    for m in _JOIN_RE.finditer(s):
+        _register(m.group(1), m.group(2))
+
     return aliases
 
 
@@ -471,30 +509,57 @@ _BOOTSTRAP_JS_TPL = r"""
   }}
 
   // FROM/JOIN <table> [AS] <alias> 를 스캔해 alias → 실 테이블 매핑.
-  // Python extract_aliases 와 동일 정책. 'o.' / 'orders.' 둘 다 동작.
+  // Python extract_aliases 와 동일 정책. 콤마 join + schema-qualified 지원.
   var NOT_ALIAS = {{
     "WHERE":1,"ON":1,"GROUP":1,"ORDER":1,"HAVING":1,"LIMIT":1,"JOIN":1,
     "INNER":1,"LEFT":1,"RIGHT":1,"FULL":1,"OUTER":1,"CROSS":1,
     "UNION":1,"EXCEPT":1,"INTERSECT":1,"AS":1,"USING":1,"SET":1,"VALUES":1
   }};
-  function extractAliases(textBefore){{
-    var s = textBefore
+  var CLAUSE_END_RE = /\b(?:WHERE|GROUP|ORDER|HAVING|LIMIT|JOIN|INNER|LEFT|RIGHT|FULL|OUTER|CROSS|UNION|EXCEPT|INTERSECT|ON|USING)\b/i;
+  var TABLE_REF_RE = /^\s*(\w+(?:\.\w+)?)\s*(?:(?:AS\s+)?(\w+))?\s*$/i;
+
+  function extractAliases(text){{
+    var s = text
       .replace(/--[^\n]*/g," ")
       .replace(/\/\*[\s\S]*?\*\//g," ")
       .replace(/'[^']*'/g," ")
       .replace(/"[^"]*"/g," ");
     var aliases = {{}};
-    var re = /\b(?:FROM|JOIN)\s+(\w+)(?:\s+(?:AS\s+)?(\w+))?/gi;
-    var m;
-    while((m = re.exec(s)) !== null){{
-      var tname = m[1];
-      var alias = m[2];
-      if(!SCHEMA[tname]) continue;
+
+    function register(tnameFull, alias){{
+      var parts = tnameFull.split(".");
+      var tname = parts[parts.length - 1];   // schema-qualified → 마지막
+      if(!SCHEMA[tname]) return;
       aliases[tname] = tname;
       if(alias && !NOT_ALIAS[alias.toUpperCase()]){{
         aliases[alias] = tname;
       }}
     }}
+
+    // FROM clause — 다음 절 키워드 전까지 잘라 콤마 list
+    var fromRe = /\bFROM\b/gi;
+    var fm;
+    while((fm = fromRe.exec(s)) !== null){{
+      var rest = s.substring(fromRe.lastIndex);
+      var em = rest.match(CLAUSE_END_RE);
+      var fromClause = em ? rest.substring(0, em.index) : rest;
+      var parts = fromClause.split(",");
+      for(var i = 0; i < parts.length; i++){{
+        var part = parts[i].replace(/^[\s]+|[\s;]+$/g, "");
+        if(!part) continue;
+        var tm = part.match(TABLE_REF_RE);
+        if(!tm) continue;
+        register(tm[1], tm[2]);
+      }}
+    }}
+
+    // JOIN — 단일 테이블
+    var joinRe = /\bJOIN\s+(\w+(?:\.\w+)?)(?:\s+(?:AS\s+)?(\w+))?/gi;
+    var jm;
+    while((jm = joinRe.exec(s)) !== null){{
+      register(jm[1], jm[2]);
+    }}
+
     return aliases;
   }}
 
