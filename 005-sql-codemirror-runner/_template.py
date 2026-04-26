@@ -1,13 +1,12 @@
 """
 SQL Runner with CodeMirror inline (single-file, 폐쇄망 친화).
 
-005 / 006 / 007 변환물 비교
----------------------------
-  · 005 = HTML/JS 단독 SQL 편집기 (popup 자동완성, Python 콜백 없음)
-  · 006 = **CodeMirror 5.65.16 인라인 임베드** (이 파일) — 에디터 자체에
-          syntax highlight 색이 입혀지고, popup 자동완성도 inline 으로 동작.
+005 / 006 변환물 비교
+---------------------
+  · 005 = **CodeMirror 5.65.16 인라인 임베드** (이 파일) — Jupyter 셀
+          안에서 에디터 자체에 syntax highlight 색 + popup 자동완성.
           ▶ 실행 버튼으로 Python 콜백 호출.
-  · 007 = 터미널 풀스크린 (Textual TUI) — 노트북/브라우저 불필요, ssh 친화.
+  · 006 = 터미널 풀스크린 (Textual TUI) — 노트북/브라우저 불필요, ssh 친화.
 
 포지셔닝 한 줄: "노트북 안에서 진짜 IDE 같은 SQL 편집 체감 + ▶ 실행 콜백"
 
@@ -16,8 +15,8 @@ SQL Runner with CodeMirror inline (single-file, 폐쇄망 친화).
 
 핵심 기능
 --------
-  1) 좌측 entity 트리 — 005 와 동일 스키마 API (add_table / from_dict /
-     from_sqlite / from_dataframes), 클릭 시 에디터 커서 위치에 정확히 인서트
+  1) 좌측 entity 트리 — add_table / from_dict / from_sqlite /
+     from_dataframes 스키마 API, 클릭 시 에디터 커서 위치에 정확히 인서트
   2) 우측 CodeMirror 에디터 — SQL syntax highlight, line number, dracula
      dark theme. Ctrl+Space → 컨텍스트 인식 자동완성 popup
   3) 컨텍스트 인식 자동완성 — 005 의 anchor 정책을 JS 사이드로 그대로 재현.

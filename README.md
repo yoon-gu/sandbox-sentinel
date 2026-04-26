@@ -31,7 +31,7 @@
 .venv/bin/jupyter lab                                  # 001/005/006 노트북
 .venv/bin/python 003-langgraph-chat-repl/basic_usage.py
 .venv/bin/python 004-langgraph-prompt-toolkit-repl/basic_usage.py
-.venv/bin/python 007-sql-tui-runner/basic_usage.py
+.venv/bin/python 006-sql-tui-runner/basic_usage.py
 ```
 
 > **폐쇄망 정책**: `requirements.txt` 의 패키지/버전은 [`environment-adapter` Skill](.claude/skills/environment-adapter/stacks/default.yaml) 의 허용 목록과 일치해야 합니다. 사내 미러에 등록되지 않은 패키지가 있으면 Skill 에 알려주세요.
@@ -87,9 +87,8 @@ Claude Code는 다음 경로의 Skill만 자동 인식합니다.
 | 002 | [sentinel-track](002-sentinel-track/) | wandb 개념 참고 | 폐쇄망용 wandb 호환 실험 트래커 (HTML 대시보드 반출) |
 | 003 | [langgraph-chat-repl](003-langgraph-chat-repl/) | langgraph + textual (MIT) | 터미널 풀스크린 LangGraph 챗봇 REPL (Claude Code 스타일, 인라인 HITL · 슬래시 팔레트) |
 | 004 | [langgraph-prompt-toolkit-repl](004-langgraph-prompt-toolkit-repl/) | langgraph + prompt_toolkit (MIT · BSD) | 003 의 prompt_toolkit 판 — textual 없이도 동작 (ipython 전이 의존) |
-| 005 | [sql-editor-notebook](005-sql-editor-notebook/) | (오리지널 · MIT) | Jupyter 셀에서 동작하는 SQL 편집기 — 좌 entity 트리 + 우 쿼리 입력 + 컨텍스트 자동완성 (HTML/JS only) |
-| 006 | [sql-codemirror-runner](006-sql-codemirror-runner/) | CodeMirror 5.65.16 (MIT) | CodeMirror 인라인 임베드 — 에디터 자체에 syntax color + popup 자동완성 + Cmd/Ctrl+Enter 실행 |
-| 007 | [sql-tui-runner](007-sql-tui-runner/) | Textual 6.11.0 (MIT) | 터미널 풀스크린 SQL Runner — Textual TextArea native SQL color + Tab 인라인 자동완성 + Ctrl+R 실행 (ssh 친화) |
+| 005 | [sql-codemirror-runner](005-sql-codemirror-runner/) | CodeMirror 5.65.16 (MIT) | CodeMirror 인라인 임베드 — Jupyter 셀 안에서 IDE 같은 SQL 편집 + popup 자동완성 + Cmd/Ctrl+Enter 실행 |
+| 006 | [sql-tui-runner](006-sql-tui-runner/) | Textual 6.11.0 (MIT) | 터미널 풀스크린 SQL Runner — Textual TextArea native SQL color + Tab 인라인 자동완성 + Ctrl+R 실행 (ssh 친화) |
 
 각 폴더의 `README.md`에 설치·사용법·제약이 한글로 정리되어 있습니다.
 

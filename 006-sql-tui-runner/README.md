@@ -1,25 +1,25 @@
-# 007 - SQL Runner TUI (Textual · 터미널 풀스크린 · 실행 가능)
+# 006 - SQL Runner TUI (Textual · 터미널 풀스크린 · 실행 가능)
 
 > **한 줄 요약**: 터미널 풀스크린에서 동작하는 single-file SQL 편집기 + 실행기. Textual TextArea 의 native SQL syntax highlight 로 **에디터 자체에 색이 입혀지고**, Tab 자동완성 (인라인 OptionList), Ctrl+R 실행, DataTable 결과 — 모두 터미널 안에서.
 
-## 005 / 006 / 007 한눈에 비교
+## 005 / 006 한눈에 비교
 
-| 항목 | 005 (HTML/JS) | 006 (CodeMirror 노트북) | **007 (Textual TUI)** |
-|---|---|---|---|
-| 환경 | Jupyter 노트북 | Jupyter 노트북 | **터미널** (ssh OK) |
-| 브라우저 / Trust 필요 | ✅ / (script 실행) | ✅ / **Trust 필수** | ❌ |
-| **에디터 자체** syntax 색 | ❌ | ✅ CodeMirror | ✅ Textual native (tree-sitter SQL) |
-| inline 자동완성 | ✅ floating popup | ✅ Ctrl+Space popup | ✅ 인라인 OptionList (Tab) |
-| 컨텍스트 추천 패널 | ✅ | ✅ | ✅ |
-| 커서 위치 정밀 인서트 | ✅ | ✅ | ✅ |
-| ▶ 실행 → Python 콜백 | ❌ | ✅ | ✅ Ctrl+R / F5 |
-| 결과 자동 표 렌더 | ❌ | ✅ pandas HTML | ✅ Textual DataTable |
-| 단축키 실행 | ❌ | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+R / F5 |
-| 의존성 | IPython | ipywidgets+IPython | **textual + rich** |
-| 파일 크기 | ~30KB | ~285KB | **~25KB** |
+| 항목 | 005 (CodeMirror 노트북) | **006 (Textual TUI, 이 변환물)** |
+|---|---|---|
+| 환경 | Jupyter 노트북 | **터미널** (ssh OK) |
+| 브라우저 / Trust 필요 | ✅ / **Trust 필수** | ❌ |
+| **에디터 자체** syntax 색 | ✅ CodeMirror | ✅ Textual native (tree-sitter SQL) |
+| inline 자동완성 | ✅ Ctrl+Space popup | ✅ 인라인 OptionList (Tab) |
+| 컨텍스트 추천 패널 | ✅ | ✅ |
+| 커서 위치 정밀 인서트 | ✅ | ✅ |
+| ▶ 실행 → Python 콜백 | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+R / F5 |
+| 결과 자동 표 렌더 | ✅ pandas HTML | ✅ Textual DataTable |
+| 후속 분석 | `runner.last_result` / `history` | DataTable 안에서만 |
+| 의존성 | ipywidgets+IPython | **textual + rich** |
+| 파일 크기 | ~285KB | **~25KB** |
 
-**언제 007 을 쓰나** — ssh / 원격 터미널에서 일할 때, JupyterLab 띄우기 부담스러울 때, Trust 정책으로 인라인 `<script>` 가 막힌 환경, 가장 가벼운 단일 파일을 원할 때.
-**여전히 노트북이 좋을 때** — 결과를 다음 셀로 넘겨 후속 분석을 이어가야 할 때 (007 은 결과를 DataTable 안에서만 봄), pandas DataFrame 의 풍부한 HTML repr 가 필요할 때.
+**언제 006 을 쓰나** — ssh / 원격 터미널에서 일할 때, JupyterLab 띄우기 부담스러울 때, Trust 정책으로 인라인 `<script>` 가 막힌 환경, 가장 가벼운 단일 파일을 원할 때.
+**여전히 노트북이 좋을 때** — 결과를 다음 셀로 넘겨 후속 분석을 이어가야 할 때 (006 은 결과를 DataTable 안에서만 봄), pandas DataFrame 의 풍부한 HTML repr 가 필요할 때.
 
 ## 원본 출처
 
@@ -28,7 +28,7 @@
 | TUI 프레임워크 | [Textual](https://github.com/Textualize/textual) (MIT) |
 | 사용 버전 | 6.11.0 (스택 핀) |
 | 라이선스 | MIT (`LICENSE` 참조) |
-| 기타 | 오리지널 wrapper · 005~007 와 동일 컨셉의 TUI 포트 |
+| 기타 | 오리지널 wrapper · 005 (CodeMirror 노트북) 와 동일 컨셉의 TUI 포트 |
 
 ## 기능 요약
 
@@ -39,7 +39,7 @@
     - **Textual TextArea** — `language="sql"` native syntax highlight (라인 번호, soft wrap, 자동 들여쓰기, undo/redo)
     - **💡 인라인 추천 OptionList** — 에디터 바로 아래 항상 보이는 컨텍스트 추천. **편집 중 자동 갱신** · popup 모달 아님
     - **결과 DataTable** — DataFrame / list[dict] / list[tuple] 자동 표 변환
-- **컨텍스트 인식 자동완성** (005~007 와 동일 정책):
+- **컨텍스트 인식 자동완성** (005 와 동일 정책):
   - `FROM` / `JOIN` 다음 → 테이블
   - `SELECT` 다음 → 컬럼 + `*` + 함수
   - `WHERE` / `AND` / `GROUP BY` / `ORDER BY` 다음 → 컬럼
@@ -149,7 +149,7 @@ runner.add_table("users", [
 ## 파일 구조
 
 ```
-007-sql-tui-runner/
+006-sql-tui-runner/
 ├── README.md
 ├── sql_tui.py             # ⭐ single-file (~25KB)
 ├── metadata.json
@@ -163,13 +163,13 @@ runner.add_table("users", [
 # 리포 루트의 통일 .venv 를 사용 (셋업: 루트 README 참고)
 
 # CLI 단위 검증 (TUI 띄우지 않고 detect_context/get_suggestions 만)
-.venv/bin/python 007-sql-tui-runner/basic_usage.py --check
+.venv/bin/python 006-sql-tui-runner/basic_usage.py --check
 
 # 풀스크린 TUI 진입 (4 테이블, ~5명 사용자, 6건 주문 데모)
-.venv/bin/python 007-sql-tui-runner/basic_usage.py
+.venv/bin/python 006-sql-tui-runner/basic_usage.py
 
 # 또는 sql_tui.py 자체에 들어있는 단순 데모
-.venv/bin/python 007-sql-tui-runner/sql_tui.py
+.venv/bin/python 006-sql-tui-runner/sql_tui.py
 ```
 
 ## 폐쇄망 친화 체크
@@ -190,4 +190,4 @@ runner.add_table("users", [
 - **마우스 동작 환경 의존** — JupyterLab 의 터미널, ssh 터미널, iTerm2/Terminal.app 등 환경에 따라 마우스 클릭 동작이 다를 수 있음. 키보드만으로 모든 조작 가능하니 마우스가 안 되면 단축키 사용.
 - **textual native SQL highlight** — Textual 6.11.0 의 TextArea 는 SQL 을 native bundled language 로 지원 (tree-sitter SQL 그래머 포함). 만약 stripped 빌드라 SQL 이 빠지면 plain text 로 fall back 됨.
 - **Korean (CJK) cursor 위치** — TextArea 가 wide character 의 cursor 위치를 정확히 잡지만, 일부 터미널 폰트에서 시각적으로 어긋날 수 있음.
-- **CTE / 서브쿼리 경계 부정확** — 005~007 와 동일하게 간이 토큰 분리.
+- **CTE / 서브쿼리 경계 부정확** — 005 와 동일하게 간이 토큰 분리.

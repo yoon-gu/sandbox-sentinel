@@ -1,31 +1,29 @@
-# 006 - SQL Runner with CodeMirror (인라인 임베드 · 실행 가능)
+# 005 - SQL Runner with CodeMirror (인라인 임베드 · 실행 가능)
 
 > **한 줄 요약**: CodeMirror 5.65.16 을 single-file `.py` 안에 통째로 인라인하여 Jupyter 셀에서 **에디터 자체에 syntax highlight + popup 자동완성** 이 적용되는 SQL Runner. ▶ 실행 (Cmd/Ctrl+Enter) 으로 Python 콜백 호출.
 
 ## 시연
 
-![006 SQL Runner 시연](screencast.gif)
+![005 SQL Runner 시연](screencast.gif)
 
-## 005 / 006 / 007 선택 가이드
+## 005 / 006 선택 가이드
 
-| 항목 | 005 (HTML/JS only) | **006 (CodeMirror 노트북)** | 007 (Textual TUI) |
-|---|---|---|---|
-| 환경 | Jupyter 노트북 | Jupyter 노트북 | 터미널 (ssh 친화) |
-| inline popup 자동완성 | ✅ 커서 위치 floating | ✅ Ctrl+Space + 자동 popup | ✅ 인라인 OptionList |
-| 컨텍스트 추천 칩 패널 | ✅ | ✅ | ✅ |
-| 커서 위치 정밀 인서트 | ✅ | ✅ | ✅ |
-| **에디터 자체** syntax 색 | ❌ | ✅ (CM dracula) | ✅ (Textual native, tree-sitter) |
-| line number / 라인 wrap | ❌ | ✅ | ✅ |
-| ▶ 실행 → Python 콜백 | ❌ | ✅ | ✅ |
-| 결과 자동 표 렌더 (모든 컬럼) | ❌ | ✅ | ✅ DataTable |
-| 단축키 실행 | ❌ | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+R / F5 |
-| 의존성 | IPython | ipywidgets + IPython + CM 인라인 | textual + rich |
-| 파일 크기 | ~30KB | **~285KB** (CM 번들 포함) | ~30KB |
-| Trusted notebook 필요 | (script 실행) | (script 실행 — Trust 필수) | ❌ |
+| 항목 | **005 (CodeMirror 노트북, 이 변환물)** | 006 (Textual TUI) |
+|---|---|---|
+| 환경 | Jupyter 노트북 | 터미널 (ssh 친화) |
+| 브라우저 / Trust | ✅ / **Trust 필수** | ❌ |
+| **에디터 자체** syntax 색 | ✅ (CM dracula) | ✅ (Textual native, tree-sitter) |
+| inline 자동완성 | ✅ Ctrl+Space + 자동 popup | ✅ 인라인 OptionList (Tab) |
+| 컨텍스트 추천 패널 | ✅ | ✅ |
+| 커서 위치 정밀 인서트 | ✅ | ✅ |
+| ▶ 실행 → Python 콜백 | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+R / F5 |
+| 결과 자동 표 렌더 (모든 컬럼) | ✅ pandas HTML | ✅ Textual DataTable |
+| 후속 분석 | `runner.last_result` / `history` 로 다음 셀 분석 | DataTable 안에서만 |
+| 의존성 | ipywidgets + IPython + CM 인라인 | textual + rich |
+| 파일 크기 | **~285KB** (CM 번들 포함) | ~30KB |
 
-**언제 005 를 쓰나** — 가장 가벼운 단일 파일, JS-only 로 충분할 때 (Python 콜백 호출 불필요).
-**언제 006 를 쓰나** — 노트북 안에서 진짜 IDE 같은 편집 체감(에디터 내부 syntax color · 라인 번호 · Ctrl+Space) 이 필요할 때.
-**언제 007 을 쓰나** — ssh / 원격 터미널 친화, Trusted notebook 정책이 부담스럽거나 가장 가벼운 단일 파일을 원할 때.
+**언제 005 를 쓰나** — 노트북 안에서 진짜 IDE 같은 편집 체감(에디터 내부 syntax color · 라인 번호 · Ctrl+Space) + 결과를 다음 셀로 넘겨 후속 분석.
+**언제 006 을 쓰나** — ssh / 원격 터미널 친화, Trusted notebook 정책이 부담스럽거나 가장 가벼운 단일 파일을 원할 때.
 
 ## 원본 출처
 
@@ -173,7 +171,7 @@ runner.show()
 ## 파일 구조
 
 ```
-006-sql-codemirror-runner/
+005-sql-codemirror-runner/
 ├── README.md
 ├── sql_codemirror.py        # ⭐ single-file 반입 단위 (~270KB, CM 인라인 포함)
 ├── metadata.json
@@ -207,8 +205,8 @@ runner.show()
 
 ## 알려진 제약 / 한계
 
-- **Trusted notebook 필요** — JupyterLab 의 untrusted 노트북에서는 인라인 `<script>` 가 차단되어 CodeMirror 가 mount 되지 않음 (`File → Trust Notebook`). 이 환경 제약이 부담이라면 **005 (HTML/JS only)** 또는 **007 (TUI)** 사용 권장.
-- **파일 크기 ~285KB** — 005(~30KB) 보다 약 9배. 보안 검토 분량이 늘어남. 다만 **CodeMirror MIT 라이선스 한 건만 추가 검토** 하면 끝.
+- **Trusted notebook 필요** — JupyterLab 의 untrusted 노트북에서는 인라인 `<script>` 가 차단되어 CodeMirror 가 mount 되지 않음 (`File → Trust Notebook`). 이 환경 제약이 부담이라면 **006 (Textual TUI)** 사용 권장.
+- **파일 크기 ~285KB** — TUI 변환물(006, ~30KB) 보다 약 9배. 보안 검토 분량이 늘어남. 다만 **CodeMirror MIT 라이선스 한 건만 추가 검토** 하면 끝.
 - **CodeMirror 5 (legacy)** — v6 가 아닌 v5 를 의도적으로 선택. v6 는 ESM 번들러(rollup/esbuild) 가 필요해 raw-string 인라인이 사실상 불가. v5 는 단일 IIFE 번들이라 인라인 적합. v5 는 유지보수 모드지만 SQL 모드/show-hint 만 쓰는 본 용도엔 충분.
 - **CTE / 서브쿼리 alias 미지원** — 다음과 같은 패턴은 자동완성 매핑이 안 됨 (TODO):
   - `WITH cte AS (...)` — CTE 본명 / 컬럼 추론. 명시 컬럼 리스트 (`WITH cte(a, b) AS ...`) 와 단순 SELECT 리스트만 우선 다루는 식으로 단계적 구현 가능. 별칭 없는 표현식·`SELECT *` 처리 등 부작용을 따져야 해 보류.
@@ -223,7 +221,7 @@ runner.show()
 
 ```bash
 # 리포 루트의 통일 .venv 를 사용
-cd 006-sql-codemirror-runner
+cd 005-sql-codemirror-runner
 ../.venv/bin/python _build.py
 # → sql_codemirror.py 가 갱신됨
 ../.venv/bin/python sql_codemirror.py    # 자체 self-check (번들 크기 등)
