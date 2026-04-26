@@ -14,47 +14,18 @@
 
 | 단계 | 변환물 | 키 메시지 | 소요 |
 |---|---|---|---|
-| 1 | [005](#005-sql-editor-notebook--html-단일파일로-쿼리-편집) | "DB 없이 HTML 한 파일만으로 쿼리 편집" | 2분 |
-| 2 | [006](#006-sql-codemirror-runner--노트북-안에서-진짜-ide) | "노트북 안에서 진짜 IDE 같은 SQL + 후속 분석" | 4분 |
-| 3 | [007](#007-sql-tui-runner--ssh-친화-풀스크린-tui) | "터미널에서도 동일 체감 (ssh 친화)" | 3분 |
-| 4 | [002](#002-sentinel-track--폐쇄망-wandb-호환) | "오프라인 학습 트래커 → HTML 대시보드 반출" | 3분 |
-| 5 | [001](#001-langgraph-notebook-chatbot--멀티턴-챗봇--트레이서) | "노트북 LangGraph 챗봇 + HITL + 트레이서" | 4분 |
-| 6 | [003](#003-langgraph-chat-repl--textual-tui-챗봇) | "터미널 풀스크린 챗봇 (Claude Code 스타일)" | 2분 |
-| 7 | [004](#004-langgraph-prompt-toolkit-repl--보수적-환경의-대안) | "textual 못 쓰는 환경의 대안" | 1분 |
+| 1 | [005](#005-sql-codemirror-runner--노트북-안에서-진짜-ide) | "노트북 안에서 진짜 IDE 같은 SQL + 후속 분석" | 4분 |
+| 2 | [006](#006-sql-tui-runner--ssh-친화-풀스크린-tui) | "터미널에서도 동일 체감 (ssh 친화)" | 3분 |
+| 3 | [002](#002-sentinel-track--폐쇄망-wandb-호환) | "오프라인 학습 트래커 → HTML 대시보드 반출" | 3분 |
+| 4 | [001](#001-langgraph-notebook-chatbot--멀티턴-챗봇--트레이서) | "노트북 LangGraph 챗봇 + HITL + 트레이서" | 4분 |
+| 5 | [003](#003-langgraph-chat-repl--textual-tui-챗봇) | "터미널 풀스크린 챗봇 (Claude Code 스타일)" | 2분 |
+| 6 | [004](#004-langgraph-prompt-toolkit-repl--보수적-환경의-대안) | "textual 못 쓰는 환경의 대안" | 1분 |
 
-총 ~20분.
-
----
-
-## 005 sql-editor-notebook — "HTML 단일파일로 쿼리 편집"
-
-### 한 줄
-
-> Python 콜백 없이 **HTML 파일 하나만으로** 좌·우 분할 SQL 편집기 + 컨텍스트 자동완성. 폐쇄망에 가장 가벼운 단위.
-
-### 시나리오
-
-1. JupyterLab 좌측 트리에서 `005-sql-editor-notebook/demo.ipynb` 열기
-2. 셀 1~3 차례 실행 → 우측 셀 출력에 좌·우 분할 SQL 편집기가 떠야 함
-3. 우측 쿼리 입력창에서:
-   - `SELECT ` 까지 치고 → **inline popup** 으로 컬럼/`*`/함수 추천이 커서 옆에 뜸 ⭐
-   - `FROM ` 다음 → 추천이 자동으로 **테이블** 만 한정
-   - `users.` 까지 치면 → users 의 컬럼만 한정 추천 (qualifier)
-   - `WHE` 까지만 쳐도 → fallback 으로 `WHERE` 추천
-4. 좌측 entity 트리에서 컬럼 클릭 → **커서 위치에 정확히** 인서트되는 것 시연
-
-### 와우 포인트
-
-- "Python 안 써요. 이거 그대로 HTML 로 저장하면 사내망 어디서든 브라우저로 열림"
-- 셀에서 `editor.save_html("/tmp/sql.html")` 하면 → 그 HTML 한 파일이 폐쇄망 반출 단위
-
-### 한계 (정직하게)
-
-- 실행 안 됨 (`SELECT * FROM users` 쿼리는 그저 텍스트). 실행하려면 → **다음 데모 (006)** 으로 넘어가는 자연스러운 전환.
+총 ~17분.
 
 ---
 
-## 006 sql-codemirror-runner — "노트북 안에서 진짜 IDE"
+## 005 sql-codemirror-runner — "노트북 안에서 진짜 IDE"
 
 ### 한 줄
 
@@ -62,14 +33,14 @@
 
 ### 시나리오
 
-1. JupyterLab 에서 `006-sql-codemirror-runner/demo.ipynb` 열기
+1. JupyterLab 에서 `005-sql-codemirror-runner/demo.ipynb` 열기
 2. **File → Trust Notebook** ⚠ (인라인 `<script>` 가 차단되면 CM 이 안 뜸)
 3. 셀 1, 2 실행 → 풀-패널 SQL Runner 가 셀 출력에 등장
 4. 에디터에서 시연 (이 순서로):
    - **(a) 에디터 안에 색이 입혀져 있음** — `SELECT` 핑크, 문자열 노랑, 숫자 주황, 주석 회색 → "노트북 셀 안에서 IDE 체감"
    - **(b) Tab 으로 자동완성 popup 호출** — `name (📝)`, `id (🔢)`, `signup_at (📅)` — **타입을 이모지로 단축** 노출 ⭐
    - **(c) `users.` 입력** → 해당 테이블 컬럼만 한정
-   - **(d) 화살표로 커서 이동** → 컨텍스트 추천 칩이 **커서 위치 기준** 으로 실시간 갱신 (← 005/008 대비 차별점)
+   - **(d) 화살표로 커서 이동** → 컨텍스트 추천 칩이 **커서 위치 기준** 으로 실시간 갱신
    - **(e) `Cmd+Enter` (또는 `Ctrl+Enter`) 로 실행** → 셀 하단에 8-열 DataFrame 표가 모든 컬럼 잘림 없이 렌더
 5. **다음 셀** 에서:
    ```python
@@ -94,7 +65,7 @@
 
 ---
 
-## 007 sql-tui-runner — "ssh 친화 풀스크린 TUI"
+## 006 sql-tui-runner — "ssh 친화 풀스크린 TUI"
 
 ### 한 줄
 
@@ -104,7 +75,7 @@
 
 1. 터미널 새 창에서:
    ```bash
-   .venv/bin/python 007-sql-tui-runner/basic_usage.py
+   .venv/bin/python 006-sql-tui-runner/basic_usage.py
    ```
 2. 풀스크린 TUI 진입. 세 영역 (좌 트리 / 우 에디터 / 하단 결과) 가 보여야 함
 3. 시연:
@@ -260,7 +231,7 @@
 
 ## 시연 마무리 (1분)
 
-> "변환물은 모두 single-file Python 으로 폐쇄망 반입 단위가 정해져 있고, 같은 컨셉(예: SQL Runner) 도 환경에 따라 4가지 변형(005/006/007/+ deleted) 을 갖춘 것이 차별점입니다. 사내 환경 정책은 [`environment-adapter` Skill](.claude/skills/environment-adapter/) 이 단일 진입점으로 관리합니다."
+> "변환물은 모두 single-file Python 으로 폐쇄망 반입 단위가 정해져 있고, 같은 컨셉(예: SQL Runner) 도 환경에 따라 두 가지 변형(005 노트북·006 TUI) 을 갖춘 것이 차별점입니다. 사내 환경 정책은 [`environment-adapter` Skill](.claude/skills/environment-adapter/) 이 단일 진입점으로 관리합니다."
 
 **Q&A 자주 나오는 질문**
 
@@ -268,6 +239,6 @@
 |---|---|
 | 외부 LLM 호출 못 하는데 어떻게 데모? | MockLLM 으로 오프라인 응답. 실제 사내 LLM 붙이는 건 1줄 교체 |
 | 사내 미러에 패키지 추가 어떻게 요청? | `requirements.txt` + `environment-adapter` 의 `default.yaml` 두 곳에 같이 갱신 |
-| 노트북 trust 가 막힌 환경 | 005 (HTML/JS only) 또는 007 (TUI) 사용 |
+| 노트북 trust 가 막힌 환경 | 006 (Textual TUI) 사용 |
 | 결과 후속 분석 | 006: `runner.last_result` / `runner.history`. 007 은 DataTable 만 |
 | Python 3.8/3.9 환경 | `environment-adapter` 가 문법 다운그레이드 담당 (`X | Y` → `Union[X, Y]` 등) |

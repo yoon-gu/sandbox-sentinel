@@ -1,5 +1,5 @@
 {
-  "id": "007",
+  "id": "006",
   "name": "sql-tui-runner",
   "source": {
     "library": "Textual (TUI 프레임워크)",
@@ -10,7 +10,9 @@
   },
   "converted_at": "2026-04-25",
   "agent_version": "0.1.0",
-  "dependencies_used": ["textual"],
+  "dependencies_used": [
+    "textual"
+  ],
   "optional_dependencies": {
     "pandas": ">=1.3  # with_sqlite() / DataFrame 결과 자동 표 변환 시",
     "tree-sitter": "fast 16.x  # 에디터 inline SQL 색 (없으면 plain text fallback, 기능 동작에 지장 없음)",

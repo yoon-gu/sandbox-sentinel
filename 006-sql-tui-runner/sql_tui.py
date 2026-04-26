@@ -1,10 +1,9 @@
 """
 SQL Runner TUI — Textual 기반 single-file SQL 편집기 + 실행 위젯.
 
-005 / 006 / 007 변환물 비교:
-  · 005 = 노트북 HTML/JS only (popup 자동완성, 실행 불가)
-  · 006 = 노트북 + CodeMirror 인라인 (~285KB, trusted notebook 필요)
-  · 007 = **터미널 TUI (Textual)** (이 파일) — 노트북/브라우저 불필요,
+005 / 006 변환물 비교:
+  · 005 = 노트북 + CodeMirror 인라인 (~285KB, trusted notebook 필요)
+  · 006 = **터미널 TUI (Textual)** (이 파일) — 노트북/브라우저 불필요,
           ssh 친화, 에디터 자체에 SQL syntax color (Textual TextArea
           native + tree-sitter-sql)
 
