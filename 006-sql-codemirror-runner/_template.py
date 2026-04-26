@@ -154,6 +154,38 @@ def detect_context(text: str) -> str:
     return MAP.get(last, "general")
 
 
+_ALIAS_RE = re.compile(
+    r"\b(?:FROM|JOIN)\s+(\w+)(?:\s+(?:AS\s+)?(\w+))?",
+    re.IGNORECASE,
+)
+# alias 위치에 와도 alias 가 아닌 reserved keyword 들 (예: "FROM orders WHERE..."
+# 의 WHERE 가 alias 로 잡히는 걸 막기 위해)
+_NOT_ALIAS = {
+    "WHERE", "ON", "GROUP", "ORDER", "HAVING", "LIMIT", "JOIN",
+    "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "UNION",
+    "EXCEPT", "INTERSECT", "AS", "USING", "SET", "VALUES",
+}
+
+
+def extract_aliases(text: str, tables: Mapping[str, list]) -> dict:
+    """``FROM <t> [AS] <alias>``, ``JOIN <t> [AS] <alias>`` 를 스캔해
+    ``alias → real_table`` 매핑을 반환. 본명 그대로도 자기 자신에 매핑."""
+    s = re.sub(r"--[^\n]*", " ", text)
+    s = re.sub(r"/\*.*?\*/", " ", s, flags=re.DOTALL)
+    s = re.sub(r"'[^']*'", " ", s)
+    s = re.sub(r'"[^"]*"', " ", s)
+    aliases: dict = {}
+    for m in _ALIAS_RE.finditer(s):
+        tname = m.group(1)
+        alias = m.group(2)
+        if tname not in tables:
+            continue
+        aliases[tname] = tname    # 본명 자체도 등록
+        if alias and alias.upper() not in _NOT_ALIAS:
+            aliases[alias] = tname
+    return aliases
+
+
 def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
     """현재 컨텍스트에 맞는 추천 후보 리스트 (텍스트 끝 기준)."""
     ctx = detect_context(text)
@@ -161,22 +193,24 @@ def get_suggestions(text: str, tables: Mapping[str, list]) -> list:
     last_word = m.group(1) if m else ""
     last_lower = last_word.lower()
 
-    # table. qualifier 우선
+    # table_or_alias. qualifier 우선
     if "." in last_word:
         dot_idx = last_word.index(".")
-        tname = last_word[:dot_idx]
+        qual = last_word[:dot_idx]
         col_prefix = last_word[dot_idx + 1:].lower()
-        if tname in tables:
+        # 본명/AS alias 모두 매핑 — 'orders.' / 'o.' 둘 다 동작
+        aliases = extract_aliases(text, tables)
+        real = aliases.get(qual)
+        if real and real in tables:
             return [
                 {
-                    "value": f"{tname}.{c['name']}",   # 실제 인서트 텍스트
-                    # 표시 라벨 — 타입을 짧은 이모지로 함께 노출 ("id 🔢")
+                    "value": f"{qual}.{c['name']}",   # 사용자가 친 그대로 인서트
                     "label": (f"{c['name']} {_short_type(c.get('type',''))}"
                               if c.get("type") else c["name"]),
                     "kind": "column",
-                    "meta": c.get("type", "") or tname,
+                    "meta": c.get("type", "") or real,
                 }
-                for c in tables[tname]
+                for c in tables[real]
                 if c["name"].lower().startswith(col_prefix)
             ][:30]
 
@@ -426,6 +460,34 @@ _BOOTSTRAP_JS_TPL = r"""
     window["__cmEditor_" + UID] = cm;
   }}
 
+  // FROM/JOIN <table> [AS] <alias> 를 스캔해 alias → 실 테이블 매핑.
+  // Python extract_aliases 와 동일 정책. 'o.' / 'orders.' 둘 다 동작.
+  var NOT_ALIAS = {{
+    "WHERE":1,"ON":1,"GROUP":1,"ORDER":1,"HAVING":1,"LIMIT":1,"JOIN":1,
+    "INNER":1,"LEFT":1,"RIGHT":1,"FULL":1,"OUTER":1,"CROSS":1,
+    "UNION":1,"EXCEPT":1,"INTERSECT":1,"AS":1,"USING":1,"SET":1,"VALUES":1
+  }};
+  function extractAliases(textBefore){{
+    var s = textBefore
+      .replace(/--[^\n]*/g," ")
+      .replace(/\/\*[\s\S]*?\*\//g," ")
+      .replace(/'[^']*'/g," ")
+      .replace(/"[^"]*"/g," ");
+    var aliases = {{}};
+    var re = /\b(?:FROM|JOIN)\s+(\w+)(?:\s+(?:AS\s+)?(\w+))?/gi;
+    var m;
+    while((m = re.exec(s)) !== null){{
+      var tname = m[1];
+      var alias = m[2];
+      if(!SCHEMA[tname]) continue;
+      aliases[tname] = tname;
+      if(alias && !NOT_ALIAS[alias.toUpperCase()]){{
+        aliases[alias] = tname;
+      }}
+    }}
+    return aliases;
+  }}
+
   // SQL 타입명을 짧은 이모지로 단축. Python _short_type 과 동일 매핑.
   function shortType(t){{
     if(!t) return "";
@@ -512,18 +574,20 @@ _BOOTSTRAP_JS_TPL = r"""
     var beforeAll = cm.getRange({{line:0,ch:0}}, cur);
     var ctx = detectContext(beforeAll);
 
-    // table. qualifier 우선 처리
+    // table_or_alias. qualifier 우선 처리
     var dot = word.indexOf(".");
     if(dot > 0){{
-      var tname = word.substring(0, dot);
+      var qual = word.substring(0, dot);
       var fp = word.substring(dot+1).toLowerCase();
-      if(SCHEMA[tname]){{
-        var list = SCHEMA[tname]
+      var aliases = extractAliases(beforeAll);
+      var real = aliases[qual];
+      if(real && SCHEMA[real]){{
+        var list = SCHEMA[real]
           .filter(function(c){{ return c.name.toLowerCase().indexOf(fp) === 0; }})
           .map(function(c){{
             // 표시 라벨에 짧은 타입 이모지 ("id 🔢")
             var disp = c.type ? (c.name + " " + shortType(c.type)) : c.name;
-            return {{ text: tname + "." + c.name, displayText: disp }};
+            return {{ text: qual + "." + c.name, displayText: disp }};
           }});
         return {{ list: list, from: CodeMirror.Pos(cur.line, start),
                  to: CodeMirror.Pos(cur.line, end) }};
