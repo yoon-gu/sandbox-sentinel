@@ -239,6 +239,9 @@ trace_*.html
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 
+# Jupyter 자동 사본 (메뉴 → Duplicate 시 생성)
+*-Copy*.ipynb
+
 # 005/006/007 SQL editor 데모 산출물
 sql_editor_snapshot*.html
 sql_editor_demo*.html
