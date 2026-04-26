@@ -601,18 +601,15 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
                 before_cursor = full
             self._update_suggest(before_cursor, full_text=full)
 
-            # 사용자가 식별자 글자(영문/숫자/_/.) 를 막 입력했으면 popup 도
-            # 자동으로 띄움 (cursor 위치에). popup 이 이미 떠 있으면 갱신만.
-            if before_cursor:
-                last_ch = before_cursor[-1]
-                if (last_ch.isalnum() or last_ch in "_.") \
-                        and self._current_sugs:
-                    self._show_popup()
-                    return
-            # 식별자가 아니면 popup 자동 닫기
+            # popup 자동 트리거 안 함 (Ctrl+Space 만으로 호출).
+            # 단, 이미 popup 이 떠 있는 동안엔 글자/커서 변경에 따라
+            # 콘텐츠와 위치를 즉시 갱신해 IDE 같은 filter-as-you-type 체감.
             popup = self.query_one("#popup", _CursorPopup)
             if "visible" in popup.classes:
-                self._hide_popup()
+                if self._current_sugs:
+                    self._show_popup()
+                else:
+                    self._hide_popup()
 
         def _update_suggest(self, text: str,
                               full_text: Optional[str] = None) -> None:
@@ -627,8 +624,8 @@ def _build_app(*, on_execute, tables, notes, initial_query, app_state=None):
                 text, self._tables, full_text=full_text)[:30]
             self.query_one("#ctx-label", Static).update(Text.from_markup(
                 f"💡 컨텍스트: [bold cyan]{ctx_label}[/]  "
-                f"[dim]· 식별자 입력 시 자동 popup · Ctrl+Space 수동 호출 · "
-                f"Tab/Enter 선택 · Esc 닫기[/]"
+                f"[dim]· Ctrl+Space 자동완성 · Tab/Enter 선택 · "
+                f"Esc 닫기 · Tab(에디터) 들여쓰기[/]"
             ))
 
         # ── floating popup 표시 / 숨기기 / 재위치 ──
