@@ -12,7 +12,7 @@
 | inline 자동완성 | ✅ Ctrl+Space popup | ✅ 인라인 OptionList (Tab) + Ctrl+N 커서 popup |
 | 컨텍스트 추천 패널 | ✅ | ✅ |
 | 커서 위치 정밀 인서트 | ✅ | ✅ |
-| ▶ 실행 → Python 콜백 | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+E / Ctrl+R / F5 |
+| ▶ 실행 → Python 콜백 | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+R / F5 / Ctrl+Enter |
 | 결과 자동 표 렌더 | ✅ pandas HTML | ✅ Textual DataTable |
 | 후속 분석 | `runner.last_result` / `history` | DataTable 안에서만 |
 | 의존성 | ipywidgets+IPython | **textual + rich** |
@@ -46,15 +46,21 @@
   - `table_name.` 입력 시 → 해당 테이블 컬럼만 한정
   - **fallback** — `WHE`, `GR`, `JOI` 같은 부분 입력은 어느 컨텍스트에서나 KEYWORDS 매치
 
-## 단축키 (모두 노트북 터미널 / xterm.js 호환)
+## 단축키
 
-> Jupyter 의 웹 터미널은 `Ctrl+Enter` 를 newline 으로, `Ctrl+Space` 를 NUL 바이트로 변환해 키 이벤트가 도달하지 않습니다. 본 변환물은 이런 키를 **사용하지 않고** 모두 letter / function 키로만 매핑되어 있습니다.
+> **터미널별 호환성 메모**
+> - `Ctrl+R` / `F5` 는 모든 터미널 (iTerm2, Alacritty, kitty, macOS Terminal, JupyterLab 웹 터미널, ssh 등) 에서 안정적으로 동작합니다.
+> - `Ctrl+Enter` 는 iTerm2 등 데스크톱 터미널에서만 동작 — JupyterLab / xterm.js 는 `Ctrl+Enter` 를 newline 으로 변환해 키 이벤트가 도달하지 않습니다. 그 환경에서는 `Ctrl+R` / `F5` 사용.
+> - `Ctrl+E` 는 macOS 의 `Cmd+→` (줄 끝 이동) 와 충돌하므로 **에디터 줄 끝 이동** 에 매핑되어 있습니다 (실행 X).
 
 | 키 | 동작 |
 |---|---|
 | **Tab / Shift+Tab** | 에디터 들여쓰기 / 해제 |
 | **Ctrl+/** | 현재 줄 / 선택 범위 SQL 주석 (`--`) 토글 |
-| **Ctrl+E / Ctrl+R / F5** | ▶ 실행 (현재 SQL 을 `on_execute` 에 전달) |
+| **Ctrl+R / F5** | ▶ 실행 (현재 SQL 을 `on_execute` 에 전달) — 모든 터미널 호환 |
+| **Ctrl+Enter** | ▶ 실행 — `iTerm2` 등 데스크톱 터미널 한정 (xterm.js/Jupyter 제외) |
+| **Ctrl+E** / **Cmd+→** | 줄 끝으로 커서 이동 |
+| **Ctrl+A** / **Cmd+←** | 줄 시작으로 커서 이동 |
 | **Ctrl+N** | 자동완성 popup (커서 근처 floating) |
 | **Ctrl+K** | 💬 채팅 popup (🚧 **미완성** — LLM 연동 hook 만 제공) |
 | **Ctrl+T** | 트리 포커스 |
