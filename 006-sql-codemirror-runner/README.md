@@ -69,7 +69,7 @@
 | REST API 사내 엔진 | `requests.post(api_url, json={'sql': sql}).json()['rows']` | list[dict] |
 | Spark / Snowflake / 사내 SQL | 해당 클라이언트의 `.sql(...).toPandas()` 등 | DataFrame |
 
-자세한 시연은 `examples/demo.ipynb` 의 §3 참고.
+자세한 시연은 `demo.ipynb` 의 §3 참고.
 
 ## 의존성
 
@@ -188,8 +188,7 @@ runner.show()
 │   ├── show-hint.css
 │   ├── dracula.css
 │   └── LICENSE
-└── examples/
-    └── demo.ipynb           # 노트북 데모 (실행 가능 시나리오 포함)
+└── demo.ipynb               # 노트북 데모 (실행 가능 시나리오 포함)
 ```
 
 > **반입 단위는 `sql_codemirror.py` 하나** 입니다. `_build.py` / `_template.py` / `_assets/` 는 빌드 시점에만 사용되며 폐쇄망에 반입할 필요가 없습니다.

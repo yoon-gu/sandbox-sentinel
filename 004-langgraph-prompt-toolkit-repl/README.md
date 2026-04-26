@@ -68,7 +68,7 @@
 
 ```bash
 # 리포 루트의 통일 .venv 를 사용 (셋업: 루트 README 참고)
-.venv/bin/python 004-langgraph-prompt-toolkit-repl/examples/basic_usage.py
+.venv/bin/python 004-langgraph-prompt-toolkit-repl/basic_usage.py
 ```
 
 실행 후 입력창에 치트시트 문구를 넣어보세요:
@@ -111,8 +111,7 @@ LLM 어댑터 인터페이스는 003 과 동일: `invoke(messages: list[dict]) -
 ├── repl.py                 # single-file 본체 (Tracer + ChatEngine + ReplApp + launch)
 ├── metadata.json
 ├── LICENSE                 # langgraph MIT
-└── examples/
-    └── basic_usage.py      # MockLLM + HITL 트리거 그래프 → REPL 기동 (003 과 동일)
+└── basic_usage.py         # MockLLM + HITL 트리거 그래프 → REPL 기동 (003 과 동일)
 ```
 
 ## 폐쇄망 친화 체크

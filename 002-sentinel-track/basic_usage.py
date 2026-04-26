@@ -3,7 +3,7 @@ basic_usage.py — sentinel_track 를 "직접" 사용하는 최소 예제 (torch
 
 실행:
     cd 002-sentinel-track
-    ./.venv/bin/python examples/basic_usage.py
+    ./.venv/bin/python basic_usage.py
 
 이 스크립트는 가상의 학습 루프 2개를 돌려 두 개의 run 을 남긴 뒤
 dashboard.html 을 생성합니다. 외부 네트워크/바이너리 파일 없이 전부 JSONL + HTML 만 씁니다.

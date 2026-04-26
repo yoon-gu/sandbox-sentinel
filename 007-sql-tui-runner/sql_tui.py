@@ -223,7 +223,7 @@ def _normalize_column(c: ColumnSpec) -> dict:
 def _build_app(*, on_execute, tables, notes, initial_query):
     """SQLRunnerTUI.run() 시점에 textual 을 import 하고 App 클래스를 동적 구성.
 
-    이 패턴은 examples/basic_usage.py 처럼 textual 을 띄우지 않는 단위
+    이 패턴은 basic_usage.py 처럼 textual 을 띄우지 않는 단위
     검증 시에도 sql_tui 모듈을 import 할 수 있게 해준다.
     """
     from textual.app import App, ComposeResult

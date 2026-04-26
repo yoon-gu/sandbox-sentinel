@@ -34,7 +34,7 @@
 
 ### 시나리오
 
-1. JupyterLab 좌측 트리에서 `005-sql-editor-notebook/examples/demo.ipynb` 열기
+1. JupyterLab 좌측 트리에서 `005-sql-editor-notebook/demo.ipynb` 열기
 2. 셀 1~3 차례 실행 → 우측 셀 출력에 좌·우 분할 SQL 편집기가 떠야 함
 3. 우측 쿼리 입력창에서:
    - `SELECT ` 까지 치고 → **inline popup** 으로 컬럼/`*`/함수 추천이 커서 옆에 뜸 ⭐
@@ -62,7 +62,7 @@
 
 ### 시나리오
 
-1. JupyterLab 에서 `006-sql-codemirror-runner/examples/demo.ipynb` 열기
+1. JupyterLab 에서 `006-sql-codemirror-runner/demo.ipynb` 열기
 2. **File → Trust Notebook** ⚠ (인라인 `<script>` 가 차단되면 CM 이 안 뜸)
 3. 셀 1, 2 실행 → 풀-패널 SQL Runner 가 셀 출력에 등장
 4. 에디터에서 시연 (이 순서로):
@@ -104,7 +104,7 @@
 
 1. 터미널 새 창에서:
    ```bash
-   .venv/bin/python 007-sql-tui-runner/examples/basic_usage.py
+   .venv/bin/python 007-sql-tui-runner/basic_usage.py
    ```
 2. 풀스크린 TUI 진입. 세 영역 (좌 트리 / 우 에디터 / 하단 결과) 가 보여야 함
 3. 시연:
@@ -174,7 +174,7 @@
 
 ### 시나리오
 
-1. JupyterLab 에서 `001-langgraph-notebook-chatbot/examples/demo.ipynb` 열기
+1. JupyterLab 에서 `001-langgraph-notebook-chatbot/demo.ipynb` 열기
 2. **0. 인터랙티브 채팅 UI** 셀 실행 → 입력창 + 메시지 영역이 셀 안에 등장
 3. 시나리오 입력 (치트시트):
    - **(a) `안녕`** — 일반 대화
@@ -209,7 +209,7 @@
 
 1. 터미널에서:
    ```bash
-   .venv/bin/python 003-langgraph-chat-repl/examples/basic_usage.py
+   .venv/bin/python 003-langgraph-chat-repl/basic_usage.py
    ```
 2. 풀스크린 진입. 메시지 영역 + 입력창 + 상태 바
 3. 시연:
@@ -240,7 +240,7 @@
 
 1. 터미널에서:
    ```bash
-   .venv/bin/python 004-langgraph-prompt-toolkit-repl/examples/basic_usage.py
+   .venv/bin/python 004-langgraph-prompt-toolkit-repl/basic_usage.py
    ```
 2. 003 과 같은 시나리오 (a)~(e) 그대로 재현
 3. 보여줄 것:

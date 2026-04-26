@@ -27,7 +27,7 @@ LangGraph 기반 터미널 챗봇 REPL — prompt_toolkit 단독 구현 (Textual
   5) 트레이스 — /trace 또는 Ctrl+T 로 self-contained HTML 저장
   6) 외부 네트워크 / 새 서버 프로세스 / 포트 오픈 0
 
-사용 예시는 examples/basic_usage.py 참고.
+사용 예시는 basic_usage.py 참고.
 """
 
 # ===== 1. Imports =====
@@ -1129,6 +1129,6 @@ _TRACE_HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 if __name__ == "__main__":
     print(
-        "이 파일은 라이브러리입니다. 사용 예시는 examples/basic_usage.py 를 참고하세요:\n"
-        "  python examples/basic_usage.py"
+        "이 파일은 라이브러리입니다. 사용 예시는 basic_usage.py 를 참고하세요:\n"
+        "  python basic_usage.py"
     )

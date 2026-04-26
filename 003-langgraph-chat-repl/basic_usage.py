@@ -4,7 +4,7 @@
 MockLLM + 최소 LangGraph 그래프를 REPL 로 기동하는 예제.
 실행:
     cd 003-langgraph-chat-repl
-    python examples/basic_usage.py
+    python basic_usage.py
 """
 from __future__ import annotations
 

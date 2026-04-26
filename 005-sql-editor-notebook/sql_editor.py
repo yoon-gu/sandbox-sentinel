@@ -924,6 +924,6 @@ _EDITOR_HTML_TEMPLATE = r"""
 
 if __name__ == "__main__":
     print(
-        "이 파일은 라이브러리입니다. 사용 예시는 examples/basic_usage.py 또는\n"
-        "examples/demo.ipynb 를 참고하세요."
+        "이 파일은 라이브러리입니다. 사용 예시는 basic_usage.py 또는\n"
+        "demo.ipynb 를 참고하세요."
     )

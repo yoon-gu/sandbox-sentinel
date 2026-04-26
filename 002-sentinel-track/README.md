@@ -63,11 +63,11 @@ python -c "import sentinel_track as w; w.build_dashboard('./sentinel_runs', 'das
 
 ### (B) 수동 로깅 (torch/HF 불필요)
 
-`examples/basic_usage.py` 가 torch 없이 바로 돌아가는 최소 예제입니다.
+`basic_usage.py` 가 torch 없이 바로 돌아가는 최소 예제입니다.
 
 ```bash
 # 리포 루트의 통일 .venv 를 사용 (셋업: 루트 README 참고)
-.venv/bin/python 002-sentinel-track/examples/basic_usage.py
+.venv/bin/python 002-sentinel-track/basic_usage.py
 open 002-sentinel-track/dashboard.html   # macOS
 ```
 
@@ -128,9 +128,8 @@ open 002-sentinel-track/dashboard.html
 ├── sentinel_track.py            # single-file 본체 (shim + 모니터 + 대시보드 빌더)
 ├── metadata.json
 ├── LICENSE
-└── examples/
-    ├── basic_usage.py           # torch/HF 없이 바로 돌아가는 최소 예제
-    └── hf_trainer_demo.py       # HuggingFace Trainer 와 결합 (transformers 필요)
+├── basic_usage.py              # torch/HF 없이 바로 돌아가는 최소 예제
+└── hf_trainer_demo.py          # HuggingFace Trainer 와 결합 (transformers 필요)
 ```
 
 ## 알려진 제약 / 한계

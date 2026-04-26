@@ -131,7 +131,7 @@ def run_checks() -> None:
     print(f"DB 위치: {db}")
     print()
     print("✓ CLI 검증 통과. 풀스크린 TUI 띄우려면:")
-    print("    python examples/basic_usage.py")
+    print("    python basic_usage.py")
 
 
 def run_tui() -> None:

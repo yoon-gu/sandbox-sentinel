@@ -53,7 +53,7 @@
 
 ```bash
 # 리포 루트의 통일 .venv 를 사용 (셋업: 루트 README 참고)
-.venv/bin/python 003-langgraph-chat-repl/examples/basic_usage.py
+.venv/bin/python 003-langgraph-chat-repl/basic_usage.py
 ```
 
 실행 후 입력창에 치트시트 문구를 넣어보세요:
@@ -100,7 +100,7 @@ class MyLLM:
         ...
 ```
 
-`examples/basic_usage.py` 의 `MockLLM` 이 그대로 참고할 수 있는 최소 예시입니다.
+`basic_usage.py` 의 `MockLLM` 이 그대로 참고할 수 있는 최소 예시입니다.
 
 ## 파일 구조
 
@@ -110,8 +110,7 @@ class MyLLM:
 ├── repl.py                 # single-file 본체 (Tracer + ChatEngine + Textual App + launch)
 ├── metadata.json
 ├── LICENSE                 # langgraph MIT
-└── examples/
-    └── basic_usage.py      # MockLLM + 최소 그래프 → REPL 기동
+└── basic_usage.py         # MockLLM + 최소 그래프 → REPL 기동
 ```
 
 ## 폐쇄망 친화 체크
