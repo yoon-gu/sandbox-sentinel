@@ -211,7 +211,10 @@ runner.show()
 - **Trusted notebook 필요** — JupyterLab 의 untrusted 노트북에서는 인라인 `<script>` 가 차단되어 CodeMirror 가 mount 되지 않음 (`File → Trust Notebook`). 이 환경 제약이 부담이라면 **005 (HTML/JS only)** 또는 **007 (TUI)** 사용 권장.
 - **파일 크기 ~285KB** — 005(~30KB) 보다 약 9배. 보안 검토 분량이 늘어남. 다만 **CodeMirror MIT 라이선스 한 건만 추가 검토** 하면 끝.
 - **CodeMirror 5 (legacy)** — v6 가 아닌 v5 를 의도적으로 선택. v6 는 ESM 번들러(rollup/esbuild) 가 필요해 raw-string 인라인이 사실상 불가. v5 는 단일 IIFE 번들이라 인라인 적합. v5 는 유지보수 모드지만 SQL 모드/show-hint 만 쓰는 본 용도엔 충분.
-- **CTE / 서브쿼리 경계 부정확** — 005 와 동일하게 간이 토큰 분리. 복잡한 쿼리에선 추천이 어색할 수 있음.
+- **CTE / 서브쿼리 alias 미지원** — 다음과 같은 패턴은 자동완성 매핑이 안 됨 (TODO):
+  - `WITH cte AS (...)` — CTE 본명 / 컬럼 추론. 명시 컬럼 리스트 (`WITH cte(a, b) AS ...`) 와 단순 SELECT 리스트만 우선 다루는 식으로 단계적 구현 가능. 별칭 없는 표현식·`SELECT *` 처리 등 부작용을 따져야 해 보류.
+  - `FROM (SELECT ...) AS sub` — 서브쿼리 alias. 괄호 균형 + 내부 SELECT 컬럼 추론 필요.
+- **콤마 join · schema-qualified 는 지원** — `FROM x, y` / `FROM public.orders AS o` 등은 정상 인식.
 - **comm channel 비공개 사용** — CM 의 변경값을 hidden ipywidgets.Textarea 의 native `input` 이벤트로 동기화. 향후 ipywidgets 가 내부 동기 메커니즘을 변경하면 깨질 수 있음 (현재 v7 / v8 까지 안정).
 - **CodeMirror v5 EOL 주시** — 보안 패치는 들어오지만 새 기능은 v6 로만 추가됨. 본 변환물은 SQL 자동완성/하이라이트만 쓰므로 큰 영향 없음.
 
