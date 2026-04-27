@@ -140,19 +140,37 @@ runner.query                       # ↘ 현재 에디터 안의 SQL (실행 안
 runner.result                      # last_result 의 짧은 alias
 
 # ── history: list 인 동시에 callable ──
-runner.history                     # [{timestamp, query, result, error}, …] 전체
+runner.history                     # [{timestamp, query, result, error, …}] 전체
 runner.history[-1]["result"]       # 마지막 실행 결과
 runner.history[0]["query"]         # 첫 실행 SQL
 len(runner.history)                # 실행 횟수
 
-# ── history() — 보기 좋게 표시 + 클립보드 복사 버튼 ──
-runner.history()                   # 전체 history (timestamp · SQL · 결과 미리보기)
-runner.history(n=10)               # 최근 10건만
+# ── history() — 날짜별 sidebar + 클립보드 복사 ──
+runner.history()                   # 전체 history (좌측 날짜 sidebar · 항목별 미리보기)
+runner.history(n=10)               # 최근 10건만 (그래도 날짜별 그룹핑됨)
 runner.history(full=False)         # 결과 미리보기 생략, SQL/timestamp 만
 md = runner.history.to_markdown()  # 전체 history 를 markdown 텍스트로 직렬화
 ```
 
-`runner.history()` 는 노트북에 HTML 로 렌더되며 **항목별 [📋 SQL 복사]** 와 상단 **[📋 전체 history 복사 (markdown)]** 버튼이 함께 표시됩니다. 클립보드 권한이 차단된 환경에서는 자동으로 hidden textarea + `execCommand('copy')` 폴백을 사용합니다.
+`runner.history()` 는 좌측에 **📅 날짜별 sidebar** + 우측에 해당 날짜의 entry 목록 (timestamp · SQL · 결과 미리보기) 으로 렌더됩니다. **항목별 [📋 SQL 복사]** + 상단 **[📋 전체 history 복사 (markdown)]** 버튼 포함. 클립보드 권한이 차단된 환경에서는 자동으로 hidden textarea + `execCommand('copy')` 폴백을 사용합니다.
+
+### 세션 연속성 — 파일 기반 history (`history_dir`)
+
+```python
+runner = SQLRunnerCM(
+    on_execute=fn,
+    history_dir=".sql_runner_history",   # 기본값. None 이면 in-memory only
+)
+```
+
+`history_dir` 이 지정되면:
+
+- ▶ 실행마다 **`<dir>/YYYY-MM-DD.jsonl`** 파일에 append-only 로 entry 저장 (1일 1파일)
+- 다음 노트북 세션에서 `SQLRunnerCM(...)` 만 다시 만들면 과거 history 자동 로드
+- 결과 본체는 저장 X — `timestamp` · `query` · `status` · `error_msg` · `row_count` · `col_count` 만 (DataFrame 직렬화 부담 + 폐쇄망 데이터 보안)
+- 이전 세션 entry 는 UI 에서 **회색 좌측 border + `[이전 세션]` 배지** 로 표시
+
+폐쇄망 친화: JSONL 텍스트 파일 한 종류 (audit/diff 가능), 외부 의존 없음.
 
 ### SQL 문법 검증 (자동)
 

@@ -553,8 +553,26 @@ def _history_to_markdown(entries: list) -> str:
     return "\n".join(lines)
 
 
-def _result_preview_html(result: Any, max_rows: int = 5) -> str:
-    """history HTML 렌더용 — 결과 객체를 짧게 미리보기."""
+def _result_preview_html(entry: dict, max_rows: int = 5) -> str:
+    """history HTML 렌더용 — 결과 객체를 짧게 미리보기.
+
+    파일에서 로드된 entry (``from_file=True``) 는 result 본체가 없으므로
+    row_count/col_count 메타만 표시.
+    """
+    result = entry.get("result")
+    if entry.get("from_file"):
+        rc = entry.get("row_count")
+        cc = entry.get("col_count")
+        if rc is None and cc is None:
+            return ("<div class='hist-result-none'>"
+                    "이전 세션 결과 — 파일에 메타만 보존됨</div>")
+        meta = []
+        if rc is not None:
+            meta.append(f"{rc}행")
+        if cc is not None:
+            meta.append(f"{cc}컬럼")
+        return (f"<div class='hist-result-none'>"
+                f"이전 세션 결과 ({' × '.join(meta)})</div>")
     if result is None:
         return "<div class='hist-result-none'>✓ 완료 (반환값 없음)</div>"
     try:
@@ -565,8 +583,9 @@ def _result_preview_html(result: Any, max_rows: int = 5) -> str:
             n_cols = len(result.columns)
             html = preview.to_html(index=False, border=0,
                                    classes="hist-df")
-            more = f" (전체 {n_total}행 × {n_cols}컬럼)" if n_total > max_rows else \
-                   f" ({n_total}행 × {n_cols}컬럼)"
+            more = (f" (전체 {n_total}행 × {n_cols}컬럼)"
+                    if n_total > max_rows
+                    else f" ({n_total}행 × {n_cols}컬럼)")
             return f"{html}<div class='hist-result-meta'>{more}</div>"
     except ImportError:
         pass
@@ -576,123 +595,218 @@ def _result_preview_html(result: Any, max_rows: int = 5) -> str:
     return f"<pre class='hist-result-other'>{escape(s)}</pre>"
 
 
-def _render_history_html(entries: list, full: bool = True) -> str:
-    """history HTML 렌더 — 항목별 [📋 SQL 복사] + 상단 [📋 전체 복사].
+def _group_by_date(entries: list) -> list:
+    """entries 를 날짜(YYYY-MM-DD)별로 묶어 (date, [entries…]) 리스트 반환.
+    최신 날짜가 앞, 같은 날짜 안에서는 timestamp 오름차순."""
+    from collections import OrderedDict
+    buckets: dict = OrderedDict()
+    for e in entries:
+        ts = e.get("timestamp", "") or ""
+        date = ts.split(" ")[0] if " " in ts else (ts or "(미상)")
+        buckets.setdefault(date, []).append(e)
+    sorted_dates = sorted(buckets.keys(), reverse=True)
+    return [(d, buckets[d]) for d in sorted_dates]
 
-    클립보드 복사는 navigator.clipboard.writeText 사용. 권한 차단 시
-    fallback 으로 hidden textarea + execCommand('copy') 시도.
+
+def _render_history_html(entries: list, full: bool = True) -> str:
+    """history HTML 렌더 — 좌측 날짜 sidebar + 항목별 [📋 SQL 복사].
+
+    날짜를 클릭하면 해당 날짜 entry 만 표시 (JS 만으로 처리). 클립보드는
+    navigator.clipboard 우선, 권한 차단 시 textarea + execCommand 폴백.
     """
     if not entries:
         return ("<div class='sql-history-view empty'>"
-                "<i>(history 비어있음)</i></div>")
+                "<i>(history 비어있음 — ▶ 실행을 누르면 누적됩니다)</i></div>")
     view_uid = "hv-" + uuid.uuid4().hex[:8]
-    md = _history_to_markdown(entries)
-    md_b64_safe = json.dumps(md)  # JS 문자열 리터럴로 안전하게 임베드
-    parts = [
-        "<style>",
-        ".sql-history-view { font-family: ui-sans-serif, system-ui; "
-        "  font-size: 12px; color: #1f2329; }",
-        ".sql-history-view .hv-top { padding: 6px 0; }",
-        ".sql-history-view .hist-entry { background: #f7f8fa; "
-        "  border: 1px solid #d8dde1; border-radius: 4px; "
-        "  padding: 8px 10px; margin: 6px 0; }",
-        ".sql-history-view .hist-entry.err { "
-        "  background: #fff4f4; border-color: #f1a4a4; }",
-        ".sql-history-view .hist-meta { display: flex; align-items: center; "
-        "  gap: 8px; margin-bottom: 4px; }",
-        ".sql-history-view .ts { color: #6c757d; font-size: 11px; }",
-        ".sql-history-view pre.hist-sql { background: #fff; "
-        "  border: 1px solid #c8ccd0; border-radius: 3px; padding: 6px 8px; "
-        "  margin: 4px 0; font-size: 12px; overflow-x: auto; "
-        "  white-space: pre-wrap; }",
-        ".sql-history-view button.copy { cursor: pointer; "
-        "  background: #fff; border: 1px solid #c8ccd0; border-radius: 3px; "
-        "  font-size: 11px; padding: 1px 6px; }",
-        ".sql-history-view button.copy:hover { background: #eef0f3; }",
-        ".sql-history-view button.copy.ok { background: #d1fae5; }",
-        ".sql-history-view .hist-err { color: #b91c1c; font-size: 11px; "
-        "  margin-top: 4px; }",
-        ".sql-history-view .hist-result-none { color: #6c757d; "
-        "  font-style: italic; }",
-        ".sql-history-view .hist-result-meta { color: #6c757d; "
-        "  font-size: 11px; margin-top: 2px; }",
-        ".sql-history-view table.hist-df { border-collapse: collapse; "
-        "  margin: 4px 0; font-size: 11px; }",
-        ".sql-history-view table.hist-df th, "
-        ".sql-history-view table.hist-df td { "
-        "  border: 1px solid #e1e4e7; padding: 2px 6px; }",
-        ".sql-history-view table.hist-df th { background: #eef0f3; }",
-        "</style>",
-        f"<div class='sql-history-view' id='{view_uid}'>",
-        "  <div class='hv-top'>",
-        f"    <b>SQL 실행 history ({len(entries)} 건)</b>",
-        "    <button class='copy copy-all'>📋 전체 history 복사 (markdown)</button>",
-        "  </div>",
-    ]
-    for i, entry in enumerate(entries, 1):
-        ts = entry.get("timestamp", "") or ""
-        sql = entry["query"]
-        err = entry.get("error")
-        result = entry.get("result")
-        cls = "hist-entry err" if err else "hist-entry"
-        status = "❌" if err else "✓"
-        parts.append(f"  <div class='{cls}'>")
-        parts.append(
-            f"    <div class='hist-meta'>"
-            f"<b>{status} #{i}</b>"
-            f"<span class='ts'>{escape(ts)}</span>"
-            f"<button class='copy copy-sql'>📋 SQL 복사</button>"
-            f"</div>"
+    md_js = json.dumps(_history_to_markdown(entries))
+    grouped = _group_by_date(entries)
+    selected = grouped[0][0]   # 최신 날짜 기본 선택
+
+    # ── CSS ──
+    css = (
+        "<style>"
+        ".sql-history-view{font-family:ui-sans-serif,system-ui;"
+        " font-size:12px;color:#1f2329;}"
+        ".sql-history-view .hv-top{padding:6px 0;display:flex;"
+        " gap:8px;align-items:center;}"
+        ".sql-history-view .hv-body{display:flex;gap:12px;"
+        " min-height:280px;}"
+        ".sql-history-view .hv-sidebar{width:170px;flex-shrink:0;"
+        " border:1px solid #d8dde1;border-radius:4px;background:#f7f8fa;"
+        " max-height:560px;overflow-y:auto;}"
+        ".sql-history-view .hv-sidebar .sb-header{padding:6px 10px;"
+        " font-weight:600;border-bottom:1px solid #e1e4e7;"
+        " background:#eef0f3;}"
+        ".sql-history-view .date-item{padding:8px 10px;cursor:pointer;"
+        " border-bottom:1px solid #e1e4e7;transition:background .12s;}"
+        ".sql-history-view .date-item:hover{background:#eef0f3;}"
+        ".sql-history-view .date-item.active{"
+        " background:#2563eb;color:#fff;}"
+        ".sql-history-view .date-item.active .c{color:#dbeafe;}"
+        ".sql-history-view .date-item .d{font-weight:600;}"
+        ".sql-history-view .date-item .c{font-size:10px;color:#6c757d;"
+        " margin-top:2px;}"
+        ".sql-history-view .hv-main{flex:1;min-width:0;"
+        " max-height:560px;overflow-y:auto;padding-right:4px;}"
+        ".sql-history-view .hist-group{display:none;}"
+        ".sql-history-view .hist-group.visible{display:block;}"
+        ".sql-history-view .hist-entry{background:#f7f8fa;"
+        " border:1px solid #d8dde1;border-radius:4px;"
+        " padding:8px 10px;margin:6px 0;}"
+        ".sql-history-view .hist-entry.err{"
+        " background:#fff4f4;border-color:#f1a4a4;}"
+        ".sql-history-view .hist-entry.from-file{"
+        " border-left:3px solid #94a3b8;}"
+        ".sql-history-view .hist-meta{display:flex;align-items:center;"
+        " gap:8px;margin-bottom:4px;flex-wrap:wrap;}"
+        ".sql-history-view .ts{color:#6c757d;font-size:11px;}"
+        ".sql-history-view .badge{font-size:10px;padding:1px 6px;"
+        " border-radius:8px;background:#e2e8f0;color:#475569;}"
+        ".sql-history-view pre.hist-sql{background:#fff;"
+        " border:1px solid #c8ccd0;border-radius:3px;padding:6px 8px;"
+        " margin:4px 0;font-size:12px;overflow-x:auto;"
+        " white-space:pre-wrap;}"
+        ".sql-history-view button.copy{cursor:pointer;background:#fff;"
+        " border:1px solid #c8ccd0;border-radius:3px;font-size:11px;"
+        " padding:1px 6px;}"
+        ".sql-history-view button.copy:hover{background:#eef0f3;}"
+        ".sql-history-view button.copy.ok{background:#d1fae5;}"
+        ".sql-history-view .hist-err{color:#b91c1c;font-size:11px;"
+        " margin-top:4px;}"
+        ".sql-history-view .hist-result-none{color:#6c757d;"
+        " font-style:italic;}"
+        ".sql-history-view .hist-result-meta{color:#6c757d;"
+        " font-size:11px;margin-top:2px;}"
+        ".sql-history-view table.hist-df{border-collapse:collapse;"
+        " margin:4px 0;font-size:11px;}"
+        ".sql-history-view table.hist-df th,"
+        ".sql-history-view table.hist-df td{"
+        " border:1px solid #e1e4e7;padding:2px 6px;}"
+        ".sql-history-view table.hist-df th{background:#eef0f3;}"
+        "</style>"
+    )
+
+    # ── sidebar (날짜 리스트) ──
+    sidebar_items = ["<div class='sb-header'>📅 날짜별</div>"]
+    for date, group in grouped:
+        cnt = len(group)
+        ok = sum(1 for e in group if e.get("error") is None)
+        err = cnt - ok
+        active = " active" if date == selected else ""
+        meta = f"{cnt}건"
+        if err:
+            meta += f" ({ok}✓ {err}❌)"
+        sidebar_items.append(
+            f"<div class='date-item{active}' data-date='{escape(date)}'>"
+            f"<div class='d'>{escape(date)}</div>"
+            f"<div class='c'>{meta}</div></div>"
         )
-        parts.append(
-            f"    <pre class='hist-sql'>{escape(sql)}</pre>"
-        )
-        if err is not None:
-            parts.append(
-                f"    <div class='hist-err'>"
-                f"❌ <b>{escape(type(err).__name__)}</b>: "
-                f"{escape(str(err))}</div>"
+
+    # ── main (날짜별 entry 그룹) ──
+    group_divs = []
+    for date, group in grouped:
+        vis = " visible" if date == selected else ""
+        rows = []
+        for i, entry in enumerate(group, 1):
+            ts = entry.get("timestamp", "") or ""
+            sql = entry["query"]
+            err = entry.get("error")
+            from_file = entry.get("from_file", False)
+            cls = "hist-entry"
+            if err:
+                cls += " err"
+            if from_file:
+                cls += " from-file"
+            status = "❌" if err else "✓"
+            badges = []
+            if from_file:
+                badges.append("<span class='badge'>이전 세션</span>")
+            if isinstance(err, SyntaxError):
+                badges.append("<span class='badge'>문법 검증 실패</span>")
+            rows.append(f"<div class='{cls}'>")
+            rows.append(
+                "<div class='hist-meta'>"
+                f"<b>{status} #{i}</b>"
+                f"<span class='ts'>{escape(ts)}</span>"
+                + "".join(badges)
+                + "<button class='copy copy-sql'>📋 SQL 복사</button>"
+                "</div>"
             )
-        elif full:
-            parts.append("    " + _result_preview_html(result))
-        parts.append("  </div>")
-    parts.append("</div>")
-    parts.append(
+            rows.append(f"<pre class='hist-sql'>{escape(sql)}</pre>")
+            if err is not None:
+                rows.append(
+                    f"<div class='hist-err'>❌ "
+                    f"<b>{escape(type(err).__name__)}</b>: "
+                    f"{escape(str(err))}</div>"
+                )
+            elif full:
+                rows.append(_result_preview_html(entry))
+            rows.append("</div>")
+        group_divs.append(
+            f"<div class='hist-group{vis}' data-date='{escape(date)}'>"
+            + "".join(rows) + "</div>"
+        )
+
+    head = (
+        f"<div class='sql-history-view' id='{view_uid}'>"
+        f"<div class='hv-top'>"
+        f"<b>SQL 실행 history</b> "
+        f"<span style='color:#6c757d'>"
+        f"({len(entries)} 건 · {len(grouped)} 일)</span>"
+        f"<button class='copy copy-all'>📋 전체 history 복사 (markdown)</button>"
+        f"</div>"
+        f"<div class='hv-body'>"
+        f"<div class='hv-sidebar'>{''.join(sidebar_items)}</div>"
+        f"<div class='hv-main'>{''.join(group_divs)}</div>"
+        f"</div>"
+        f"</div>"
+    )
+
+    script = (
         "<script>(function(){"
         f"const root=document.getElementById('{view_uid}');"
         "if(!root)return;"
+        # 날짜 클릭 → 해당 그룹만 visible
+        "root.querySelectorAll('.date-item').forEach(it=>{"
+        " it.addEventListener('click',()=>{"
+        "  const d=it.dataset.date;"
+        "  root.querySelectorAll('.date-item').forEach(x=>"
+        "   x.classList.toggle('active',x.dataset.date===d));"
+        "  root.querySelectorAll('.hist-group').forEach(g=>"
+        "   g.classList.toggle('visible',g.dataset.date===d));"
+        " });});"
+        # 클립보드 복사 (navigator.clipboard + 폴백)
         "function fb(text,btn){"
         " const ta=document.createElement('textarea');"
         " ta.value=text;ta.style.position='fixed';ta.style.opacity='0';"
         " document.body.appendChild(ta);ta.select();"
         " try{document.execCommand('copy');btn.textContent='✓ 복사됨';"
-        "      btn.classList.add('ok');"
-        "      setTimeout(()=>{btn.textContent=btn.dataset.orig;"
-        "      btn.classList.remove('ok');},1500);}"
-        " catch(e){alert('클립보드 복사 차단됨. 직접 선택해 복사하세요.');}"
-        " document.body.removeChild(ta);"
-        "}"
+        "  btn.classList.add('ok');"
+        "  setTimeout(()=>{btn.textContent=btn.dataset.orig;"
+        "   btn.classList.remove('ok');},1500);}"
+        " catch(e){alert('복사 차단됨. 직접 선택해 복사하세요.');}"
+        " document.body.removeChild(ta);}"
         "function copy(text,btn){"
         " btn.dataset.orig=btn.dataset.orig||btn.textContent;"
         " if(navigator.clipboard&&window.isSecureContext){"
         "  navigator.clipboard.writeText(text).then("
         "   ()=>{btn.textContent='✓ 복사됨';btn.classList.add('ok');"
-        "        setTimeout(()=>{btn.textContent=btn.dataset.orig;"
-        "        btn.classList.remove('ok');},1500);},"
+        "    setTimeout(()=>{btn.textContent=btn.dataset.orig;"
+        "     btn.classList.remove('ok');},1500);},"
         "   ()=>fb(text,btn));"
-        " }else{fb(text,btn);}"
-        "}"
+        " }else{fb(text,btn);}}"
         "root.querySelectorAll('.copy-sql').forEach(btn=>{"
         " btn.addEventListener('click',()=>{"
         "  const pre=btn.closest('.hist-entry').querySelector('pre.hist-sql');"
         "  copy(pre.textContent,btn);});});"
+        f"const allMd={md_js};"
         "const allBtn=root.querySelector('.copy-all');"
-        f"const allMd={md_b64_safe};"
         "if(allBtn){allBtn.addEventListener('click',"
         " ()=>copy(allMd,allBtn));}"
         "})();</script>"
     )
-    return "\n".join(parts)
+
+    return css + head + script
 
 
 # ===== 에디터 부트스트랩 JS (CM 인스턴스 생성 + 컨텍스트 자동완성) =====
@@ -1086,19 +1200,25 @@ class SQLRunnerCM:
 
     def __init__(self,
                  on_execute: Optional[Callable[[str], Any]] = None,
-                 on_validate: Optional[Callable[[str], tuple]] = None) -> None:
+                 on_validate: Optional[Callable[[str], tuple]] = None,
+                 history_dir: Optional[str] = ".sql_runner_history") -> None:
         """
         Args:
             on_execute: ``f(sql) -> Any`` SQL 실행 콜백.
             on_validate: ``f(sql) -> (ok, message)`` 사용자 정의 SQL 검증
-                콜백 (선택). 미지정 시 내장 ``validate_sql`` 사용 — 기본/
-                인용/괄호 균형 검사.
+                콜백 (선택). 미지정 시 내장 ``validate_sql`` 사용.
+            history_dir: 실행 이력을 저장할 디렉토리 경로 (CWD 상대 또는
+                절대). 파일은 ``YYYY-MM-DD.jsonl`` 1일 1파일로 append-only.
+                ``None`` 으로 끄면 in-memory 만 사용. 기본값
+                ``".sql_runner_history"`` 는 노트북 디렉토리에 dotted 폴더
+                생성 → 다음 노트북 세션에서 자동 로드되어 history 가 이어짐.
         """
         self.tables: dict[str, list[dict]] = {}
         self.notes: dict[str, str] = {}
         self.initial_query: str = ""
         self.on_execute = on_execute
         self.on_validate = on_validate or validate_sql
+        self.history_dir = history_dir
 
         # ── 후속 분석을 위한 실행 상태 ──
         # ▶ 실행 후 다음 셀에서 runner.last_result.head() 같이 접근 가능.
@@ -1107,16 +1227,116 @@ class SQLRunnerCM:
         self.last_error: Optional[BaseException] = None  # 실패했다면 예외
         # history 는 list 인 동시에 callable — runner.history() 로 보기 좋게
         # 표시 + SQL/전체 복사 버튼 제공. list 메서드는 그대로 동작.
+        # 생성 시점에 history_dir 의 .jsonl 파일들을 모두 읽어 누적 로드.
         self.history: _HistoryView = _HistoryView()
+        self._load_history_dir()
 
         self._textarea = None
         self._cursor_text = None    # CM cursor 위치까지의 텍스트 (cursorActivity 동기화용)
         self._run_box = None
         self._output = None
         self._suggest_box = None
-        self._validate_box = None   # ✓/❌ + 메시지 표시 위젯
+        self._validate_box = None   # ❌ + 메시지 표시 위젯 (성공 시 비어있음)
         self._run_btn = None        # ▶ 실행 버튼 (검증 결과에 따라 disabled 토글)
         self._uid = "u" + uuid.uuid4().hex[:10]
+
+    # ----- history 파일 영속화 -----
+
+    def _load_history_dir(self) -> None:
+        """``history_dir`` 의 모든 ``*.jsonl`` 파일을 timestamp 순으로 로드.
+
+        result/error 객체 자체는 보존되지 않으며 (DataFrame 등은 직렬화
+        부담/보안 우려), entry 의 query · timestamp · status · error_msg ·
+        row_count · col_count 만 복원된다. 복원된 entry 는 ``from_file=True``
+        플래그가 붙어 UI 에서 "이전 세션" 으로 표시된다.
+        """
+        import os
+        if not self.history_dir or not os.path.isdir(self.history_dir):
+            return
+        try:
+            files = sorted(f for f in os.listdir(self.history_dir)
+                           if f.endswith(".jsonl"))
+        except OSError:
+            return
+        loaded: list = []
+        for fname in files:
+            path = os.path.join(self.history_dir, fname)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        status = entry.get("status", "success")
+                        msg = entry.get("error_msg")
+                        if status == "validation_failed":
+                            entry["error"] = SyntaxError(msg or "validation failed")
+                        elif status == "error":
+                            entry["error"] = RuntimeError(msg or "execution error")
+                        else:
+                            entry["error"] = None
+                        entry["result"] = None
+                        entry["from_file"] = True
+                        loaded.append(entry)
+            except OSError:
+                continue
+        # timestamp 기준 정렬 (오래된 것부터)
+        loaded.sort(key=lambda e: e.get("timestamp", ""))
+        self.history.extend(loaded)
+
+    def _append_to_history_dir(self, entry: dict) -> None:
+        """현재 세션에서 새로 실행한 entry 를 오늘 날짜의 .jsonl 에 append.
+
+        엔트리는 통과/실패 모두 기록 — 실패 사례도 추후 학습/재시도용으로
+        가치가 있음. result 본체는 저장하지 않고 row_count / col_count 만
+        보존 (DataFrame 직렬화 부담 + 폐쇄망 데이터 보안).
+        """
+        import os
+        if not self.history_dir:
+            return
+        ts = entry.get("timestamp") or ""
+        date = ts.split(" ")[0] if " " in ts else (
+            datetime.date.today().isoformat())
+        try:
+            os.makedirs(self.history_dir, exist_ok=True)
+        except OSError:
+            return
+        err = entry.get("error")
+        if isinstance(err, SyntaxError):
+            status = "validation_failed"
+        elif err is not None:
+            status = "error"
+        else:
+            status = "success"
+        persist = {
+            "timestamp": ts,
+            "query": entry.get("query") or "",
+            "status": status,
+            "error_msg": str(err) if err else None,
+            "row_count": None,
+            "col_count": None,
+        }
+        result = entry.get("result")
+        if result is not None:
+            try:
+                import pandas as pd
+                if isinstance(result, pd.DataFrame):
+                    persist["row_count"] = len(result)
+                    persist["col_count"] = len(result.columns)
+                elif isinstance(result, list):
+                    persist["row_count"] = len(result)
+            except ImportError:
+                pass
+        path = os.path.join(self.history_dir, f"{date}.jsonl")
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(persist, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
 
     @property
     def query(self) -> str:
@@ -1666,11 +1886,9 @@ class SQLRunnerCM:
             self._run_btn.disabled = not ok
             self._run_btn.tooltip = "" if ok else (msg or "SQL 검증 실패")
         if self._validate_box is not None:
+            # 통과 시에는 메시지 숨김 (조용한 성공) — 실패 시에만 빨간 표시
             if ok:
-                self._validate_box.value = (
-                    "<span style='color:#15803d;font-size:11px'>"
-                    "✓ SQL 검증 통과</span>"
-                )
+                self._validate_box.value = ""
             else:
                 self._validate_box.value = (
                     "<span style='color:#b91c1c;font-size:11px'>"
@@ -1760,10 +1978,12 @@ class SQLRunnerCM:
                     err = SyntaxError(msg or "SQL validation failed")
                     self.last_error = err
                     self.last_result = None
-                    self.history.append({
+                    entry = {
                         "timestamp": ts, "query": sql,
                         "result": None, "error": err,
-                    })
+                    }
+                    self.history.append(entry)
+                    self._append_to_history_dir(entry)
                     return
             if not sql.strip():
                 print("⚠ SQL 이 비어있습니다.")
@@ -1780,19 +2000,23 @@ class SQLRunnerCM:
                 import traceback
                 self.last_error = e
                 self.last_result = None
-                self.history.append({
+                entry = {
                     "timestamp": ts, "query": sql,
                     "result": None, "error": e,
-                })
+                }
+                self.history.append(entry)
+                self._append_to_history_dir(entry)
                 print(f"❌ {type(e).__name__}: {e}")
                 traceback.print_exc()
                 return
             self.last_error = None
             self.last_result = result
-            self.history.append({
+            entry = {
                 "timestamp": ts, "query": sql,
                 "result": result, "error": None,
-            })
+            }
+            self.history.append(entry)
+            self._append_to_history_dir(entry)
             self._render_result(result)
 
     def _render_result(self, result: Any) -> None:

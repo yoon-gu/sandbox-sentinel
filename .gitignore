@@ -259,3 +259,7 @@ artifacts/
 # 002 sentinel-track 학습 산출 (런타임 생성)
 sentinel_runs/
 **/dashboard.html
+
+# 005 SQL Runner 영속 history (날짜별 .jsonl, 사내 SQL 흐름이 들어갈 수 있어 커밋 금지)
+.sql_runner_history/
+**/.sql_runner_history/
