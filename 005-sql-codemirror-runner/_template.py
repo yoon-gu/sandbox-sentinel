@@ -1958,65 +1958,87 @@ class SQLRunnerCM:
         if self._suggest_box is not None:
             self._suggest_box.children = children
 
-    def _on_run(self, _btn: Any) -> None:
-        from IPython.display import display
-        sql = self._textarea.value if self._textarea is not None else ""
-        # last_query 는 빈 SQL 이라도 일단 기록 (사용자가 디버깅 시 도움)
-        self.last_query = sql
+    def execute(self, sql: str) -> Any:
+        """SQL 을 실행하고 history 에 누적. ``show()`` 의 ▶ 실행 버튼과
+        동일한 동작을 노트북 외부 코드에서 호출 가능하게 노출.
+
+        절차:
+          1. ``on_validate(sql)`` 검증 → 실패 시 ``SyntaxError`` raise
+          2. ``on_execute(sql)`` 실행 → 결과 반환
+          3. 성공/실패 양쪽 모두 timestamp 와 함께 ``self.history`` 에 append,
+             ``history_dir`` 가 설정된 경우 그날의 ``YYYY-MM-DD.jsonl`` 에도
+             자동 append (파일 저장은 완전히 내부 동작).
+
+        Returns:
+            ``on_execute(sql)`` 의 반환값.
+        Raises:
+            SyntaxError: 검증 실패.
+            RuntimeError: ``on_execute`` 미등록.
+            Exception: ``on_execute`` 가 던진 예외 그대로 전파.
+        """
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.last_query = sql
+        if self.on_validate is not None:
+            try:
+                ok, msg = self.on_validate(sql)
+            except Exception:
+                ok, msg = True, None
+            if not ok:
+                err = SyntaxError(msg or "SQL validation failed")
+                self.last_error = err
+                self.last_result = None
+                entry = {"timestamp": ts, "query": sql,
+                         "result": None, "error": err}
+                self.history.append(entry)
+                self._append_to_history_dir(entry)
+                raise err
+        if self.on_execute is None:
+            raise RuntimeError(
+                "on_execute 콜백이 등록되지 않았습니다. "
+                "SQLRunnerCM(on_execute=fn) 으로 주입 후 사용하세요."
+            )
+        try:
+            result = self.on_execute(sql)
+        except Exception as e:
+            self.last_error = e
+            self.last_result = None
+            entry = {"timestamp": ts, "query": sql,
+                     "result": None, "error": e}
+            self.history.append(entry)
+            self._append_to_history_dir(entry)
+            raise
+        self.last_error = None
+        self.last_result = result
+        entry = {"timestamp": ts, "query": sql,
+                 "result": result, "error": None}
+        self.history.append(entry)
+        self._append_to_history_dir(entry)
+        return result
+
+    def _on_run(self, _btn: Any) -> None:
+        """show() 의 ▶ 실행 버튼 핸들러 — execute() 를 호출하고 결과 또는
+        에러를 Output 위젯에 렌더. 파일 저장은 execute() 내부에서 자동 수행."""
+        sql = self._textarea.value if self._textarea is not None else ""
         with self._output:
             self._output.clear_output()
-            # 1차: 문법 검증 — 실패 시 실행 차단 + 사용자에게 빨간 메시지
-            if self.on_validate is not None:
-                try:
-                    ok, msg = self.on_validate(sql)
-                except Exception:
-                    ok, msg = True, None  # 검증 콜백 깨짐 → 통과 취급
-                if not ok:
-                    print(f"❌ SQL 문법 오류: {msg}")
-                    print("   에디터를 확인하고 수정 후 다시 실행해주세요.")
-                    err = SyntaxError(msg or "SQL validation failed")
-                    self.last_error = err
-                    self.last_result = None
-                    entry = {
-                        "timestamp": ts, "query": sql,
-                        "result": None, "error": err,
-                    }
-                    self.history.append(entry)
-                    self._append_to_history_dir(entry)
-                    return
             if not sql.strip():
                 print("⚠ SQL 이 비어있습니다.")
                 return
-            if self.on_execute is None:
-                print("on_execute 콜백이 등록되지 않았습니다.")
-                print("SQLRunnerCM(on_execute=lambda sql: pd.read_sql(sql, conn))")
-                print("처럼 콜백을 주입하면 ▶ 실행 시 호출됩니다.\n")
-                print(f"SQL:\n{sql}")
-                return
             try:
-                result = self.on_execute(sql)
+                result = self.execute(sql)
+            except SyntaxError as e:
+                print(f"❌ SQL 문법 오류: {e}")
+                print("   에디터를 확인하고 수정 후 다시 실행해주세요.")
+                return
+            except RuntimeError as e:
+                print(str(e))
+                print(f"\nSQL:\n{sql}")
+                return
             except Exception as e:
                 import traceback
-                self.last_error = e
-                self.last_result = None
-                entry = {
-                    "timestamp": ts, "query": sql,
-                    "result": None, "error": e,
-                }
-                self.history.append(entry)
-                self._append_to_history_dir(entry)
                 print(f"❌ {type(e).__name__}: {e}")
                 traceback.print_exc()
                 return
-            self.last_error = None
-            self.last_result = result
-            entry = {
-                "timestamp": ts, "query": sql,
-                "result": result, "error": None,
-            }
-            self.history.append(entry)
-            self._append_to_history_dir(entry)
             self._render_result(result)
 
     def _render_result(self, result: Any) -> None:
