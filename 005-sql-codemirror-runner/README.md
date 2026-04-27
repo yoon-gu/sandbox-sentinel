@@ -18,7 +18,7 @@
 | 커서 위치 정밀 인서트 | ✅ | ✅ |
 | ▶ 실행 → Python 콜백 | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+R / F5 |
 | 결과 자동 표 렌더 (모든 컬럼) | ✅ pandas HTML | ✅ Textual DataTable |
-| 후속 분석 | `runner.last_result` / `history` 로 다음 셀 분석 | DataTable 안에서만 |
+| 후속 분석 | `runner.last_result` · `runner.history()` (timestamp + 클립보드 복사) | DataTable 안에서만 |
 | 의존성 | ipywidgets + IPython + CM 인라인 | textual + rich |
 | 파일 크기 | **~310KB** (CM 번들 포함) | ~30KB |
 
@@ -123,7 +123,7 @@ def on_execute(sql: str) -> Any:
 
 콜백 미등록 시 ▶ 실행 클릭 → 안내 메시지 + SQL 출력만 표시 (시연용).
 
-### 후속 분석 — `runner.last_result` / `runner.history`
+### 후속 분석 — `runner.last_result` / `runner.history()`
 
 ▶ 실행 후 `runner` 객체에 결과가 보관되어 다음 셀에서 곧장 후속 분석 가능:
 
@@ -139,12 +139,38 @@ runner.last_error                  # 실패했다면 Exception, 성공이면 Non
 runner.query                       # ↘ 현재 에디터 안의 SQL (실행 안 했어도 OK)
 runner.result                      # last_result 의 짧은 alias
 
-runner.history                     # [{query, result, error}, ...] 모든 실행 기록
-runner.history[-1]["result"]       # 마지막 실행
-runner.history[0]["query"]         # 첫 실행
+# ── history: list 인 동시에 callable ──
+runner.history                     # [{timestamp, query, result, error}, …] 전체
+runner.history[-1]["result"]       # 마지막 실행 결과
+runner.history[0]["query"]         # 첫 실행 SQL
+len(runner.history)                # 실행 횟수
+
+# ── history() — 보기 좋게 표시 + 클립보드 복사 버튼 ──
+runner.history()                   # 전체 history (timestamp · SQL · 결과 미리보기)
+runner.history(n=10)               # 최근 10건만
+runner.history(full=False)         # 결과 미리보기 생략, SQL/timestamp 만
+md = runner.history.to_markdown()  # 전체 history 를 markdown 텍스트로 직렬화
 ```
 
-> 위젯이 떠 있는 동안 ▶ 실행을 여러 번 눌러도 매번 `history` 에 누적 기록되므로 시도해본 쿼리들을 한 번에 비교/탐색할 수 있습니다.
+`runner.history()` 는 노트북에 HTML 로 렌더되며 **항목별 [📋 SQL 복사]** 와 상단 **[📋 전체 history 복사 (markdown)]** 버튼이 함께 표시됩니다. 클립보드 권한이 차단된 환경에서는 자동으로 hidden textarea + `execCommand('copy')` 폴백을 사용합니다.
+
+### SQL 문법 검증 (자동)
+
+에디터 입력이 변경될 때마다 **내장 `validate_sql()`** 이 호출되어 ✓/❌ 상태가 에디터 아래에 표시됩니다. 검증 실패 시 ▶ 실행 버튼이 비활성화되어 잘못된 SQL 의 실행을 미연에 차단합니다.
+
+- 검사 항목: 빈 문자열, 알 수 없는 시작 키워드, 따옴표 균형 (`'` `"`), 괄호 균형 `( )`
+- 외부 의존 없음 (sqlparse / sqlglot 미사용) — 폐쇄망 친화
+- 깊은 grammar 검증이 필요하면 `SQLRunnerCM(on_execute=fn, on_validate=my_validator)` 로 사용자 정의 콜백 주입. `(ok: bool, message: Optional[str])` 튜플을 반환
+
+```python
+def strict_validator(sql: str):
+    # 사내 SQL 정책 검사 (예: SELECT * 금지, LIMIT 필수 등)
+    if "SELECT *" in sql.upper():
+        return False, "SELECT * 사용 금지 (필요 컬럼만 명시)"
+    return True, None
+
+runner = SQLRunnerCM(on_execute=fn, on_validate=strict_validator)
+```
 
 ### 직접 등록
 
