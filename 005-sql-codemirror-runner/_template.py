@@ -41,6 +41,7 @@ SQL Runner with CodeMirror inline (single-file, 폐쇄망 친화).
 """
 from __future__ import annotations
 
+import datetime
 import json
 import re
 import sqlite3
@@ -358,6 +359,340 @@ def _normalize_column(c: ColumnSpec) -> dict:
             "doc": str(c.get("doc", "")),
         }
     raise TypeError(f"알 수 없는 컬럼 스펙 형식: {type(c).__name__}")
+
+
+# ===== SQL 문법 검증 (Python 사이드 · 외부 의존 없음) =====
+# 폐쇄망 호환 — sqlparse / sqlglot 등 별도 패키지 없이 동작. 깊은 grammar
+# 검증이 필요하면 SQLRunnerCM(on_validate=fn) 으로 사용자 정의 콜백 주입.
+
+_VALID_SQL_STARTS = {
+    "SELECT", "WITH", "INSERT", "UPDATE", "DELETE",
+    "CREATE", "DROP", "ALTER", "TRUNCATE",
+    "EXPLAIN", "PRAGMA", "REPLACE", "VACUUM",
+    "ATTACH", "DETACH", "ANALYZE",
+    "BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT", "RELEASE",
+    "SHOW", "DESCRIBE", "DESC", "USE",
+}
+
+
+def _strip_sql_comments(sql: str) -> str:
+    """검증 전에 -- 라인 주석과 /* */ 블록 주석을 제거."""
+    sql = re.sub(r"--[^\n]*", "", sql)
+    sql = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
+    return sql
+
+
+def _is_balanced_quotes(sql: str) -> tuple[bool, str]:
+    """문자열 리터럴 (', ") 이 짝이 맞는지 검사. 라인 주석 제거 후 호출."""
+    in_single = False
+    in_double = False
+    i = 0
+    while i < len(sql):
+        ch = sql[i]
+        if in_single:
+            if ch == "'":
+                # SQL 표준: '' 는 escape — 두 개 연속이면 그대로
+                if i + 1 < len(sql) and sql[i + 1] == "'":
+                    i += 2
+                    continue
+                in_single = False
+        elif in_double:
+            if ch == '"':
+                if i + 1 < len(sql) and sql[i + 1] == '"':
+                    i += 2
+                    continue
+                in_double = False
+        else:
+            if ch == "'":
+                in_single = True
+            elif ch == '"':
+                in_double = True
+        i += 1
+    if in_single:
+        return False, "작은따옴표(')가 닫히지 않았습니다"
+    if in_double:
+        return False, "큰따옴표(\")가 닫히지 않았습니다"
+    return True, ""
+
+
+def validate_sql(sql: str) -> tuple[bool, Optional[str]]:
+    """SQL 의 기본 문법을 검사 (외부 의존 없음).
+
+    Returns:
+        (ok, message). ok=True 면 message=None. ok=False 면 사용자에게
+        보여줄 한글 한 줄 메시지.
+
+    검사 항목 (모두 통과해야 ok=True):
+      1. 빈 문자열 / 주석만 있음 → False
+      2. 첫 비공백 토큰이 알려진 SQL verb (SELECT, WITH, INSERT, …) → True
+      3. 괄호 ( ) 가 짝 → True
+      4. 따옴표 ', " 가 닫힘 → True
+
+    grammar 수준 (테이블/컬럼 존재) 은 검증하지 않으며 on_execute 시점의
+    예외로 사용자에게 전달됨.
+    """
+    if not sql or not sql.strip():
+        return False, "SQL 이 비어있습니다"
+
+    cleaned = _strip_sql_comments(sql).strip()
+    if not cleaned:
+        return False, "SQL 이 주석만 있습니다"
+
+    # 첫 토큰 검사
+    m = re.match(r"\s*(\w+)", cleaned)
+    if not m:
+        return False, "SQL 시작 키워드를 찾을 수 없습니다"
+    first = m.group(1).upper()
+    if first not in _VALID_SQL_STARTS:
+        return False, (
+            f"알 수 없는 SQL 시작 키워드: '{m.group(1)}' "
+            f"(허용: SELECT · WITH · INSERT · UPDATE · DELETE 등)"
+        )
+
+    # 따옴표 균형 검사 — 라인 주석을 제거한 텍스트에서
+    ok_q, msg_q = _is_balanced_quotes(cleaned)
+    if not ok_q:
+        return False, msg_q
+
+    # 괄호 균형 검사 — 따옴표 안의 ( ) 는 무시해야 정확
+    depth = 0
+    in_single = in_double = False
+    i = 0
+    while i < len(cleaned):
+        ch = cleaned[i]
+        if in_single:
+            if ch == "'":
+                if i + 1 < len(cleaned) and cleaned[i + 1] == "'":
+                    i += 2
+                    continue
+                in_single = False
+        elif in_double:
+            if ch == '"':
+                if i + 1 < len(cleaned) and cleaned[i + 1] == '"':
+                    i += 2
+                    continue
+                in_double = False
+        else:
+            if ch == "'":
+                in_single = True
+            elif ch == '"':
+                in_double = True
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth < 0:
+                    return False, "닫는 괄호 ')' 가 여는 괄호보다 많습니다"
+        i += 1
+    if depth > 0:
+        return False, f"여는 괄호 '(' 가 {depth} 개 닫히지 않았습니다"
+
+    return True, None
+
+
+# ===== 실행 history 뷰 (list 인 동시에 callable) =====
+# runner.history          → list 처럼 인덱싱 / iteration / append
+# runner.history()        → 보기 좋은 HTML 표시 + SQL/전체 복사 버튼
+
+class _HistoryView(list):
+    """list 를 상속한 실행 이력 컨테이너.
+
+    `runner.history` 는 list 로 동작 (`runner.history[-1]`, `len(...)`,
+    `for entry in runner.history` 등). `runner.history()` 호출 시 노트북에
+    HTML 로 보기 좋게 표시되며, 각 항목별 [📋 SQL 복사] 버튼과 상단의
+    [📋 전체 history 복사] 버튼이 포함된다.
+
+    각 entry 의 dict 형식:
+        {"timestamp": "2026-04-27 15:42:11",
+         "query":     "SELECT ...",
+         "result":    <DataFrame | list | dict | None>,
+         "error":     None | Exception}
+    """
+
+    def __call__(self, n: Optional[int] = None,
+                 full: bool = False) -> None:
+        try:
+            from IPython.display import display, HTML
+        except ImportError:
+            for entry in (list(self) if n is None else list(self)[-n:]):
+                ts = entry.get("timestamp", "")
+                err = entry.get("error")
+                status = "❌" if err else "✓"
+                print(f"[{ts}] {status}")
+                print(entry["query"])
+                if err:
+                    print(f"   → {type(err).__name__}: {err}")
+                print()
+            return
+        entries = list(self) if n is None else list(self)[-n:]
+        display(HTML(_render_history_html(entries, full=full)))
+
+    def to_markdown(self) -> str:
+        """전체 history 를 markdown 텍스트로 직렬화 (외부 사용)."""
+        return _history_to_markdown(list(self))
+
+
+def _history_to_markdown(entries: list) -> str:
+    """history entry list 를 markdown 텍스트로 직렬화.
+
+    각 entry 는 timestamp, status, SQL, 에러(있으면) 를 포함한 절로 변환.
+    """
+    if not entries:
+        return "_(history 비어있음)_\n"
+    lines = [f"# SQL 실행 history ({len(entries)} 건)\n"]
+    for i, entry in enumerate(entries, 1):
+        ts = entry.get("timestamp", "")
+        err = entry.get("error")
+        status = "❌ 에러" if err else "✓ 성공"
+        lines.append(f"## #{i} · {ts} · {status}\n")
+        lines.append("```sql")
+        lines.append(entry["query"].rstrip())
+        lines.append("```\n")
+        if err:
+            lines.append(f"**에러**: `{type(err).__name__}: {err}`\n")
+    return "\n".join(lines)
+
+
+def _result_preview_html(result: Any, max_rows: int = 5) -> str:
+    """history HTML 렌더용 — 결과 객체를 짧게 미리보기."""
+    if result is None:
+        return "<div class='hist-result-none'>✓ 완료 (반환값 없음)</div>"
+    try:
+        import pandas as pd
+        if isinstance(result, pd.DataFrame):
+            preview = result.head(max_rows)
+            n_total = len(result)
+            n_cols = len(result.columns)
+            html = preview.to_html(index=False, border=0,
+                                   classes="hist-df")
+            more = f" (전체 {n_total}행 × {n_cols}컬럼)" if n_total > max_rows else \
+                   f" ({n_total}행 × {n_cols}컬럼)"
+            return f"{html}<div class='hist-result-meta'>{more}</div>"
+    except ImportError:
+        pass
+    s = repr(result)
+    if len(s) > 400:
+        s = s[:400] + " …"
+    return f"<pre class='hist-result-other'>{escape(s)}</pre>"
+
+
+def _render_history_html(entries: list, full: bool = True) -> str:
+    """history HTML 렌더 — 항목별 [📋 SQL 복사] + 상단 [📋 전체 복사].
+
+    클립보드 복사는 navigator.clipboard.writeText 사용. 권한 차단 시
+    fallback 으로 hidden textarea + execCommand('copy') 시도.
+    """
+    if not entries:
+        return ("<div class='sql-history-view empty'>"
+                "<i>(history 비어있음)</i></div>")
+    view_uid = "hv-" + uuid.uuid4().hex[:8]
+    md = _history_to_markdown(entries)
+    md_b64_safe = json.dumps(md)  # JS 문자열 리터럴로 안전하게 임베드
+    parts = [
+        "<style>",
+        ".sql-history-view { font-family: ui-sans-serif, system-ui; "
+        "  font-size: 12px; color: #1f2329; }",
+        ".sql-history-view .hv-top { padding: 6px 0; }",
+        ".sql-history-view .hist-entry { background: #f7f8fa; "
+        "  border: 1px solid #d8dde1; border-radius: 4px; "
+        "  padding: 8px 10px; margin: 6px 0; }",
+        ".sql-history-view .hist-entry.err { "
+        "  background: #fff4f4; border-color: #f1a4a4; }",
+        ".sql-history-view .hist-meta { display: flex; align-items: center; "
+        "  gap: 8px; margin-bottom: 4px; }",
+        ".sql-history-view .ts { color: #6c757d; font-size: 11px; }",
+        ".sql-history-view pre.hist-sql { background: #fff; "
+        "  border: 1px solid #c8ccd0; border-radius: 3px; padding: 6px 8px; "
+        "  margin: 4px 0; font-size: 12px; overflow-x: auto; "
+        "  white-space: pre-wrap; }",
+        ".sql-history-view button.copy { cursor: pointer; "
+        "  background: #fff; border: 1px solid #c8ccd0; border-radius: 3px; "
+        "  font-size: 11px; padding: 1px 6px; }",
+        ".sql-history-view button.copy:hover { background: #eef0f3; }",
+        ".sql-history-view button.copy.ok { background: #d1fae5; }",
+        ".sql-history-view .hist-err { color: #b91c1c; font-size: 11px; "
+        "  margin-top: 4px; }",
+        ".sql-history-view .hist-result-none { color: #6c757d; "
+        "  font-style: italic; }",
+        ".sql-history-view .hist-result-meta { color: #6c757d; "
+        "  font-size: 11px; margin-top: 2px; }",
+        ".sql-history-view table.hist-df { border-collapse: collapse; "
+        "  margin: 4px 0; font-size: 11px; }",
+        ".sql-history-view table.hist-df th, "
+        ".sql-history-view table.hist-df td { "
+        "  border: 1px solid #e1e4e7; padding: 2px 6px; }",
+        ".sql-history-view table.hist-df th { background: #eef0f3; }",
+        "</style>",
+        f"<div class='sql-history-view' id='{view_uid}'>",
+        "  <div class='hv-top'>",
+        f"    <b>SQL 실행 history ({len(entries)} 건)</b>",
+        "    <button class='copy copy-all'>📋 전체 history 복사 (markdown)</button>",
+        "  </div>",
+    ]
+    for i, entry in enumerate(entries, 1):
+        ts = entry.get("timestamp", "") or ""
+        sql = entry["query"]
+        err = entry.get("error")
+        result = entry.get("result")
+        cls = "hist-entry err" if err else "hist-entry"
+        status = "❌" if err else "✓"
+        parts.append(f"  <div class='{cls}'>")
+        parts.append(
+            f"    <div class='hist-meta'>"
+            f"<b>{status} #{i}</b>"
+            f"<span class='ts'>{escape(ts)}</span>"
+            f"<button class='copy copy-sql'>📋 SQL 복사</button>"
+            f"</div>"
+        )
+        parts.append(
+            f"    <pre class='hist-sql'>{escape(sql)}</pre>"
+        )
+        if err is not None:
+            parts.append(
+                f"    <div class='hist-err'>"
+                f"❌ <b>{escape(type(err).__name__)}</b>: "
+                f"{escape(str(err))}</div>"
+            )
+        elif full:
+            parts.append("    " + _result_preview_html(result))
+        parts.append("  </div>")
+    parts.append("</div>")
+    parts.append(
+        "<script>(function(){"
+        f"const root=document.getElementById('{view_uid}');"
+        "if(!root)return;"
+        "function fb(text,btn){"
+        " const ta=document.createElement('textarea');"
+        " ta.value=text;ta.style.position='fixed';ta.style.opacity='0';"
+        " document.body.appendChild(ta);ta.select();"
+        " try{document.execCommand('copy');btn.textContent='✓ 복사됨';"
+        "      btn.classList.add('ok');"
+        "      setTimeout(()=>{btn.textContent=btn.dataset.orig;"
+        "      btn.classList.remove('ok');},1500);}"
+        " catch(e){alert('클립보드 복사 차단됨. 직접 선택해 복사하세요.');}"
+        " document.body.removeChild(ta);"
+        "}"
+        "function copy(text,btn){"
+        " btn.dataset.orig=btn.dataset.orig||btn.textContent;"
+        " if(navigator.clipboard&&window.isSecureContext){"
+        "  navigator.clipboard.writeText(text).then("
+        "   ()=>{btn.textContent='✓ 복사됨';btn.classList.add('ok');"
+        "        setTimeout(()=>{btn.textContent=btn.dataset.orig;"
+        "        btn.classList.remove('ok');},1500);},"
+        "   ()=>fb(text,btn));"
+        " }else{fb(text,btn);}"
+        "}"
+        "root.querySelectorAll('.copy-sql').forEach(btn=>{"
+        " btn.addEventListener('click',()=>{"
+        "  const pre=btn.closest('.hist-entry').querySelector('pre.hist-sql');"
+        "  copy(pre.textContent,btn);});});"
+        "const allBtn=root.querySelector('.copy-all');"
+        f"const allMd={md_b64_safe};"
+        "if(allBtn){allBtn.addEventListener('click',"
+        " ()=>copy(allMd,allBtn));}"
+        "})();</script>"
+    )
+    return "\n".join(parts)
 
 
 # ===== 에디터 부트스트랩 JS (CM 인스턴스 생성 + 컨텍스트 자동완성) =====
@@ -750,24 +1085,37 @@ class SQLRunnerCM:
     """
 
     def __init__(self,
-                 on_execute: Optional[Callable[[str], Any]] = None) -> None:
+                 on_execute: Optional[Callable[[str], Any]] = None,
+                 on_validate: Optional[Callable[[str], tuple]] = None) -> None:
+        """
+        Args:
+            on_execute: ``f(sql) -> Any`` SQL 실행 콜백.
+            on_validate: ``f(sql) -> (ok, message)`` 사용자 정의 SQL 검증
+                콜백 (선택). 미지정 시 내장 ``validate_sql`` 사용 — 기본/
+                인용/괄호 균형 검사.
+        """
         self.tables: dict[str, list[dict]] = {}
         self.notes: dict[str, str] = {}
         self.initial_query: str = ""
         self.on_execute = on_execute
+        self.on_validate = on_validate or validate_sql
 
         # ── 후속 분석을 위한 실행 상태 ──
         # ▶ 실행 후 다음 셀에서 runner.last_result.head() 같이 접근 가능.
         self.last_query: Optional[str] = None      # 마지막으로 실행한 SQL
         self.last_result: Any = None               # 마지막 실행의 반환값
         self.last_error: Optional[BaseException] = None  # 실패했다면 예외
-        self.history: list[dict] = []              # [{query, result, error}]
+        # history 는 list 인 동시에 callable — runner.history() 로 보기 좋게
+        # 표시 + SQL/전체 복사 버튼 제공. list 메서드는 그대로 동작.
+        self.history: _HistoryView = _HistoryView()
 
         self._textarea = None
         self._cursor_text = None    # CM cursor 위치까지의 텍스트 (cursorActivity 동기화용)
         self._run_box = None
         self._output = None
         self._suggest_box = None
+        self._validate_box = None   # ✓/❌ + 메시지 표시 위젯
+        self._run_btn = None        # ▶ 실행 버튼 (검증 결과에 따라 disabled 토글)
         self._uid = "u" + uuid.uuid4().hex[:10]
 
     @property
@@ -914,6 +1262,7 @@ class SQLRunnerCM:
         run_btn = W.Button(description="▶ 실행 (Cmd/Ctrl+Enter)",
                            button_style="primary",
                            layout=W.Layout(width="auto"))
+        self._run_btn = run_btn
         csv_btn = W.Button(description="⬇ CSV 다운로드",
                            tooltip="마지막 실행 결과 (last_result) 를 CSV 로 저장",
                            layout=W.Layout(width="auto"))
@@ -954,6 +1303,12 @@ class SQLRunnerCM:
                             min_height="32px"),
         )
 
+        # ── SQL 문법 검증 상태 표시 ──
+        # 텍스트 변경마다 on_validate(sql) 호출 → ✓/❌ 와 메시지 표시.
+        # 검증 실패 시 run_btn.disabled = True 로 ▶ 실행 차단.
+        self._validate_box = W.HTML(
+            value="", layout=W.Layout(padding="2px 6px"))
+
         # ── 결과 Output — 에디터(~30줄)에 공간을 양보, Output 은 컴팩트
         # 사용자가 큰 결과를 보고 싶으면 다음 셀에서 runner.last_result 로
         # 후속 분석을 이어가는 패턴 권장. Output min_height 는 작게.
@@ -969,6 +1324,12 @@ class SQLRunnerCM:
         # 하므로 화살표로 커서만 이동해도 추천 갱신.
         self._cursor_text.observe(self._on_text_change, names="value")
         self._update_suggest(self.initial_query)
+
+        # ── 전체 SQL 변경 → 문법 검증 ──
+        # cursor_text 가 아닌 _textarea (전체 SQL) 변경 시점에만 검증해
+        # 화살표 이동 시 불필요한 재검증을 피함.
+        self._textarea.observe(self._on_full_text_change, names="value")
+        self._update_validation(self.initial_query)
 
         # ── 우측 상단 패널: 에디터 + 추천 + 액션 ──
         # 결과 Output 은 따로 빼서 셀 전체 너비를 차지하게 만든다.
@@ -991,6 +1352,7 @@ class SQLRunnerCM:
                 '</div>'
             ),
             self._suggest_box,
+            self._validate_box,
             actions,
         ], layout=W.Layout(flex="1", min_width="0"))
 
@@ -1005,7 +1367,7 @@ class SQLRunnerCM:
                 'border-radius:4px 4px 0 0;font-size:11px;'
                 'color:#1f2329"><b>📤 실행 결과</b>  '
                 '<span style="color:#6c757d">'
-                '· runner.last_result / runner.history 로 후속 분석 가능'
+                '· runner.last_result · runner.history() 로 이력 보기 / 복사'
                 '</span></div>'
             ),
             self._output,
@@ -1284,6 +1646,37 @@ class SQLRunnerCM:
         new_text = change.get("new", "")
         self._update_suggest(new_text)
 
+    def _on_full_text_change(self, change: Mapping[str, Any]) -> None:
+        """전체 SQL 변경마다 문법 검증 + ▶ 실행 버튼 활성/비활성 토글."""
+        self._update_validation(change.get("new", ""))
+
+    def _update_validation(self, sql: str) -> None:
+        """on_validate(sql) 호출 → 상태 박스/실행 버튼 갱신.
+
+        검증 콜백 자체가 예외를 던지면 안전하게 graceful 처리해 (검증 통과)
+        취급 — 사용자 정의 검증이 깨져도 실행은 막지 않는다.
+        """
+        try:
+            ok, msg = self.on_validate(sql) if self.on_validate else (True, None)
+        except Exception as e:
+            ok, msg = True, None
+            print(f"⚠ on_validate 콜백 예외 (실행은 허용): "
+                  f"{type(e).__name__}: {e}")
+        if self._run_btn is not None:
+            self._run_btn.disabled = not ok
+            self._run_btn.tooltip = "" if ok else (msg or "SQL 검증 실패")
+        if self._validate_box is not None:
+            if ok:
+                self._validate_box.value = (
+                    "<span style='color:#15803d;font-size:11px'>"
+                    "✓ SQL 검증 통과</span>"
+                )
+            else:
+                self._validate_box.value = (
+                    "<span style='color:#b91c1c;font-size:11px'>"
+                    f"❌ {escape(msg or 'SQL 검증 실패')}</span>"
+                )
+
     def _update_suggest(self, text: str) -> None:
         """추천 칩 패널 갱신. 컨텍스트 라벨 + 클릭 가능 Button 칩 렌더."""
         import ipywidgets as W
@@ -1352,8 +1745,26 @@ class SQLRunnerCM:
         sql = self._textarea.value if self._textarea is not None else ""
         # last_query 는 빈 SQL 이라도 일단 기록 (사용자가 디버깅 시 도움)
         self.last_query = sql
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with self._output:
             self._output.clear_output()
+            # 1차: 문법 검증 — 실패 시 실행 차단 + 사용자에게 빨간 메시지
+            if self.on_validate is not None:
+                try:
+                    ok, msg = self.on_validate(sql)
+                except Exception:
+                    ok, msg = True, None  # 검증 콜백 깨짐 → 통과 취급
+                if not ok:
+                    print(f"❌ SQL 문법 오류: {msg}")
+                    print("   에디터를 확인하고 수정 후 다시 실행해주세요.")
+                    err = SyntaxError(msg or "SQL validation failed")
+                    self.last_error = err
+                    self.last_result = None
+                    self.history.append({
+                        "timestamp": ts, "query": sql,
+                        "result": None, "error": err,
+                    })
+                    return
             if not sql.strip():
                 print("⚠ SQL 이 비어있습니다.")
                 return
@@ -1369,15 +1780,19 @@ class SQLRunnerCM:
                 import traceback
                 self.last_error = e
                 self.last_result = None
-                self.history.append({"query": sql, "result": None,
-                                      "error": e})
+                self.history.append({
+                    "timestamp": ts, "query": sql,
+                    "result": None, "error": e,
+                })
                 print(f"❌ {type(e).__name__}: {e}")
                 traceback.print_exc()
                 return
             self.last_error = None
             self.last_result = result
-            self.history.append({"query": sql, "result": result,
-                                  "error": None})
+            self.history.append({
+                "timestamp": ts, "query": sql,
+                "result": result, "error": None,
+            })
             self._render_result(result)
 
     def _render_result(self, result: Any) -> None:
