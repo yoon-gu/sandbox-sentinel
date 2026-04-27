@@ -25,7 +25,8 @@
     "▶ 실행 → on_execute(sql) Python 콜백 호출",
     "Cmd/Ctrl+Enter 단축키로도 ▶ 실행",
     "CM ↔ hidden ipywidgets.Textarea 동기화 — native 'input' 이벤트 dispatch 로 Python 쪽 value 자동 갱신",
-    "좌측 entity 트리 클릭 → CM 의 현재 커서 위치에 정확히 인서트 (마지막 부분 단어 prefix 매치 시 자동 치환)",
+    "좌측 entity 패널: 단일 HTML 위젯(검색창 + 테이블 그룹) — 위젯 객체 비용 0 으로 수백 컬럼 스키마도 즉시 렌더, JS 자체 substring 필터로 Python round-trip 없는 즉석 검색, 클릭 → CM 의 현재 커서 위치에 정확히 인서트 (마지막 부분 단어 prefix 매치 시 자동 치환)",
+    "💾 CSV / Excel 파일 저장 — 노트북 작업 디렉토리(os.getcwd()) 에 sql_result_<ts>.csv/.xlsx 로 직접 저장 후 IPython.FileLink 로 클릭 가능 링크 안내 (브라우저 다운로드와 별개 경로)",
     "외부 네트워크/CDN/바이너리 영속화 0 · 단일 .py 반입"
   ],
   "limitations": [
