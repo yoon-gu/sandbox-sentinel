@@ -876,63 +876,14 @@ class SQLRunnerCM:
                 "show() 는 Jupyter + ipywidgets 가 필요합니다."
             ) from e
 
-        # ── 좌측 entity 트리 ──
-        tree_children: list = [
-            W.HTML(
-                '<div style="padding:8px 10px;font-weight:600;font-size:12px;'
-                'background:#eef0f3;border-bottom:1px solid #d8dde1">'
-                '📚 Entities</div>'
-            ),
-        ]
-        if not self.tables:
-            tree_children.append(W.HTML(
-                '<div style="padding:12px;color:#888;font-size:11px">'
-                '등록된 테이블이 없습니다. <br>'
-                '<code>add_table(...)</code> / <code>from_dict(...)</code> '
-                '로 추가하세요.</div>'
-            ))
-        else:
-            for tname, cols in self.tables.items():
-                tbtn = W.Button(
-                    description=f"📋 {tname}  ({len(cols)})",
-                    layout=W.Layout(width="218px", height="26px",
-                                    margin="2px 0 1px 0"),
-                )
-                tbtn.style.button_color = "#fafbfc"
-                tbtn.on_click(self._make_inserter(tname))
-                tree_children.append(tbtn)
-
-                if self.notes.get(tname):
-                    tree_children.append(W.HTML(
-                        f'<div style="padding:0 8px 2px 18px;font-size:10px;'
-                        f'color:#6c757d;font-style:italic">'
-                        f'{escape(self.notes[tname])}</div>'
-                    ))
-
-                # ── 컬럼: 컴팩트한 wrap-flex Button 칩 + 호버 시 doc 만 노출
-                # 컬럼명은 칩 자체에 표시되니 tooltip 에 중복할 필요 없고,
-                # type 도 자동완성 추천 popup 에서 (TYPE) 으로 보여주므로 호버
-                # 에는 description (doc) 만. doc 가 없는 컬럼은 tooltip 미노출.
-                col_btns: list = []
-                for c in cols:
-                    tooltip = c.get("doc", "") or ""
-                    cbtn = W.Button(
-                        description=c["name"],
-                        tooltip=tooltip,
-                        layout=W.Layout(margin="1px", width="auto",
-                                        height="22px"),
-                    )
-                    cbtn.style.button_color = "#ffffff"
-                    cbtn.on_click(self._make_inserter(c["name"]))
-                    col_btns.append(cbtn)
-                tree_children.append(W.HBox(
-                    col_btns,
-                    layout=W.Layout(flex_flow="row wrap",
-                                    padding="0 8px 6px 14px"),
-                ))
-
-        tree = W.VBox(
-            tree_children,
+        # ── 좌측 entity 패널 ──
+        # 위젯 객체(테이블/컬럼당 W.Button) 대신 단일 W.HTML 한 덩어리로
+        # 렌더. 수백 개 entity 가 있어도 위젯 comm/DOM 비용이 0 이고, 검색창
+        # + 자체 JS 로 즉석 필터링한다. 클릭은 컨테이너 단일 delegated
+        # listener 가 받아 window['__cmInsert_<uid>'] 를 직접 호출 — Python
+        # round-trip 이 없으므로 인서트도 더 빠름.
+        tree = W.HTML(
+            self._entity_panel_html(),
             layout=W.Layout(width="240px", overflow="auto",
                             max_height="700px",   # 에디터 600px + 추천/액션 여유분
                             border="1px solid #c8ccd0",
@@ -969,18 +920,29 @@ class SQLRunnerCM:
         xlsx_btn = W.Button(description="⬇ Excel 다운로드",
                             tooltip="마지막 실행 결과 (last_result) 를 .xlsx 로 저장",
                             layout=W.Layout(width="auto"))
+        # 💾 저장 버튼 — 다운로드와 달리 노트북 cwd 에 직접 파일을 떨어뜨려
+        # 후속 셀에서 pd.read_csv 로 다시 읽거나 사내 파일 공유에 쓰기 좋음.
+        save_csv_btn = W.Button(description="💾 CSV 파일 저장",
+                                tooltip="cwd 에 sql_result_<ts>.csv 저장",
+                                layout=W.Layout(width="auto"))
+        save_xlsx_btn = W.Button(description="💾 Excel 파일 저장",
+                                 tooltip="cwd 에 sql_result_<ts>.xlsx 저장",
+                                 layout=W.Layout(width="auto"))
         clear_btn = W.Button(description="🗑 지우기",
                              layout=W.Layout(width="auto"))
         run_btn.on_click(self._on_run)
         csv_btn.on_click(self._on_download_csv)
         xlsx_btn.on_click(self._on_download_xlsx)
+        save_csv_btn.on_click(self._on_save_csv)
+        save_xlsx_btn.on_click(self._on_save_xlsx)
         clear_btn.on_click(self._on_clear)
 
         self._run_box = W.HBox([run_btn], layout=W.Layout(padding="0"))
         self._run_box.add_class(f"cm-run-{self._uid}")
         actions = W.HBox(
-            [self._run_box, csv_btn, xlsx_btn, clear_btn],
-            layout=W.Layout(padding="4px 0"),
+            [self._run_box, csv_btn, xlsx_btn,
+             save_csv_btn, save_xlsx_btn, clear_btn],
+            layout=W.Layout(padding="4px 0", flex_flow="row wrap"),
         )
 
         # ── 추천 칩 패널 (005 와 동일 컨셉) ──
@@ -1060,6 +1022,10 @@ class SQLRunnerCM:
         # 3. 부트스트랩 JS — 위 레이아웃의 hidden textarea / mount 를 찾아
         #    CodeMirror 인스턴스 mount
         display(HTML(self._cm_bootstrap_html()))
+        # 4. Entity 패널 부트스트랩 — 검색 필터 + 클릭 delegation 결합
+        #    (W.HTML 안의 <script> 는 일부 Jupyter frontend 에서 실행되지
+        #    않을 수 있으므로 부트스트랩과 동일한 패턴으로 별도 발행)
+        display(HTML(self._entity_panel_bootstrap_html()))
 
     # ----- 내부 헬퍼 -----
 
@@ -1090,6 +1056,199 @@ class SQLRunnerCM:
             schema_json=json.dumps(schema_for_js, ensure_ascii=False),
             keywords_json=json.dumps(_KEYWORDS),
             functions_json=json.dumps(_FUNCTIONS),
+        )
+        return f"<script>{js}</script>"
+
+    def _entity_panel_html(self) -> str:
+        """좌측 entity 패널의 HTML 마크업 (CSS + 검색 input + 테이블/컬럼).
+
+        위젯 객체(W.Button, W.HBox 다수) 를 만들지 않고 단일 W.HTML 로
+        렌더하므로 수백 entity 도 즉시 표시됨. 클릭/검색은
+        _entity_panel_bootstrap_html() 의 delegated listener 가 처리.
+
+        XSS 안전:
+          · 표시 텍스트와 title 은 html.escape() 통과
+          · data-snippet 은 urllib.parse.quote() 인코딩 → JS 에서
+            decodeURIComponent 로 복원 (인용부호/태그 모두 안전)
+        """
+        from urllib.parse import quote
+
+        uid = self._uid
+        parts: list[str] = []
+        # 패널 스코프 CSS — 다른 인스턴스/페이지 스타일과 충돌 회피.
+        # 색/크기는 기존 W.Button 시절 (테이블 #fafbfc, 컬럼 #ffffff,
+        # 헤더 #eef0f3, 폭 240px) 을 그대로 재현.
+        parts.append(
+            f"<style>"
+            f"#entity-panel-{uid}{{font-size:11px;box-sizing:border-box}}"
+            f"#entity-panel-{uid} *,"
+            f"#entity-panel-{uid} *::before,"
+            f"#entity-panel-{uid} *::after{{box-sizing:border-box}}"
+            f"#entity-panel-{uid} .ep-header{{"
+            f"padding:8px 10px;font-weight:600;font-size:12px;"
+            f"background:#eef0f3;border-bottom:1px solid #d8dde1;"
+            f"position:sticky;top:0;z-index:1}}"
+            f"#entity-panel-{uid} .ep-search-wrap{{"
+            f"padding:6px 8px;background:#f7f8fa;"
+            f"border-bottom:1px solid #e3e6e9;"
+            f"position:sticky;top:30px;z-index:1}}"
+            f"#entity-panel-{uid} .ep-search{{"
+            f"width:100%;padding:4px 8px;font-size:11px;"
+            f"border:1px solid #c8ccd0;border-radius:3px;outline:none}}"
+            f"#entity-panel-{uid} .ep-search:focus{{border-color:#2563eb}}"
+            f"#entity-panel-{uid} .ep-empty{{"
+            f"padding:12px;color:#888;font-size:11px}}"
+            f"#entity-panel-{uid} .ep-tbl{{margin-bottom:2px}}"
+            f"#entity-panel-{uid} .ep-tbl-btn{{"
+            f"display:block;width:218px;height:26px;"
+            f"margin:2px 8px 1px 8px;padding:0 6px;"
+            f"background:#fafbfc;border:1px solid #c8ccd0;"
+            f"border-radius:3px;cursor:pointer;"
+            f"font-size:11px;text-align:left;color:#1f2329;"
+            f"white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}"
+            f"#entity-panel-{uid} .ep-tbl-btn:hover{{background:#eef0f3}}"
+            f"#entity-panel-{uid} .ep-note{{"
+            f"padding:0 8px 2px 18px;font-size:10px;"
+            f"color:#6c757d;font-style:italic}}"
+            f"#entity-panel-{uid} .ep-cols{{"
+            f"display:flex;flex-flow:row wrap;"
+            f"padding:0 8px 6px 14px;gap:2px}}"
+            f"#entity-panel-{uid} .ep-col-btn{{"
+            f"height:22px;padding:0 6px;"
+            f"background:#fff;border:1px solid #d0d4d8;"
+            f"border-radius:3px;cursor:pointer;"
+            f"font-size:11px;color:#1f2329;margin:1px}}"
+            f"#entity-panel-{uid} .ep-col-btn:hover{{"
+            f"background:#f0f4ff;border-color:#2563eb}}"
+            f"#entity-panel-{uid} .ep-no-match{{"
+            f"display:none;padding:8px 12px;"
+            f"color:#888;font-size:11px;font-style:italic}}"
+            f"</style>"
+        )
+        parts.append(f'<div id="entity-panel-{uid}" class="entity-panel">')
+        parts.append('<div class="ep-header">📚 Entities</div>')
+        parts.append(
+            '<div class="ep-search-wrap">'
+            '<input type="search" class="ep-search" '
+            'placeholder="🔎 검색 (테이블/컬럼)..." '
+            'autocomplete="off" spellcheck="false"></div>'
+        )
+        if not self.tables:
+            parts.append(
+                '<div class="ep-empty">'
+                '등록된 테이블이 없습니다.<br>'
+                '<code>add_table(...)</code> / <code>from_dict(...)</code> '
+                '로 추가하세요.</div>'
+            )
+        else:
+            for tname, cols in self.tables.items():
+                tname_q = quote(tname, safe="")
+                note = self.notes.get(tname, "") or ""
+                parts.append(
+                    f'<div class="ep-tbl" '
+                    f'data-tname="{escape(tname.lower())}">'
+                )
+                parts.append(
+                    f'<button type="button" class="ep-btn ep-tbl-btn" '
+                    f'data-snippet="{tname_q}" '
+                    f'title="{escape(note)}">'
+                    f'📋 {escape(tname)}  ({len(cols)})</button>'
+                )
+                if note:
+                    parts.append(
+                        f'<div class="ep-note">{escape(note)}</div>'
+                    )
+                parts.append('<div class="ep-cols">')
+                for c in cols:
+                    cname = c["name"]
+                    cname_q = quote(cname, safe="")
+                    doc = c.get("doc", "") or ""
+                    parts.append(
+                        f'<button type="button" class="ep-btn ep-col-btn" '
+                        f'data-snippet="{cname_q}" '
+                        f'data-cname="{escape(cname.lower())}" '
+                        f'title="{escape(doc)}">{escape(cname)}</button>'
+                    )
+                parts.append('</div>')   # ep-cols
+                parts.append('</div>')   # ep-tbl
+            # 검색 결과 0개일 때 안내 메시지 (JS 에서 toggle)
+            parts.append(
+                '<div class="ep-no-match">검색 결과가 없습니다.</div>'
+            )
+        parts.append('</div>')
+        return ''.join(parts)
+
+    def _entity_panel_bootstrap_html(self) -> str:
+        """Entity 패널의 클릭 delegation + 검색 필터 JS.
+
+        ipywidgets 가 layout 을 비동기로 mount 할 수 있어 setInterval 로
+        폴링한 뒤 1회만 wire-up. CM mount 의 부트스트랩과 동일 패턴.
+        """
+        uid = self._uid
+        # JSON encode UID into a JS string literal (안전).
+        uid_lit = json.dumps(uid)
+        js = (
+            "(function(){"
+            f"var UID={uid_lit};"
+            "function tryWire(){"
+            "var panel=document.getElementById('entity-panel-'+UID);"
+            "if(!panel)return false;"
+            "if(panel.dataset.wired==='1')return true;"
+            "panel.dataset.wired='1';"
+            "panel.addEventListener('click',function(e){"
+            "var btn=e.target.closest&&e.target.closest('.ep-btn');"
+            "if(!btn||!panel.contains(btn))return;"
+            "var raw=btn.dataset.snippet||'';"
+            "var snippet;"
+            "try{snippet=decodeURIComponent(raw);}catch(_e){snippet=raw;}"
+            "var fn=window['__cmInsert_'+UID];"
+            "if(fn)fn(snippet);"
+            "});"
+            "var search=panel.querySelector('.ep-search');"
+            "var noMatch=panel.querySelector('.ep-no-match');"
+            "if(search){"
+            "search.addEventListener('input',function(){"
+            "var q=(search.value||'').toLowerCase().trim();"
+            "var tbls=panel.querySelectorAll('.ep-tbl');"
+            "var anyVisible=false;"
+            "for(var i=0;i<tbls.length;i++){"
+            "var tbl=tbls[i];"
+            "var cbs=tbl.querySelectorAll('.ep-col-btn');"
+            "if(!q){"
+            "tbl.style.display='';"
+            "for(var j=0;j<cbs.length;j++)cbs[j].style.display='';"
+            "anyVisible=true;"
+            "continue;"
+            "}"
+            "var tname=tbl.dataset.tname||'';"
+            "if(tname.indexOf(q)>=0){"
+            "tbl.style.display='';"
+            "for(var j=0;j<cbs.length;j++)cbs[j].style.display='';"
+            "anyVisible=true;"
+            "}else{"
+            "var any=false;"
+            "for(var j=0;j<cbs.length;j++){"
+            "var cn=cbs[j].dataset.cname||'';"
+            "if(cn.indexOf(q)>=0){cbs[j].style.display='';any=true;}"
+            "else{cbs[j].style.display='none';}"
+            "}"
+            "tbl.style.display=any?'':'none';"
+            "if(any)anyVisible=true;"
+            "}"
+            "}"
+            "if(noMatch)noMatch.style.display=(q&&!anyVisible)?'block':'none';"
+            "});"
+            "}"
+            "return true;"
+            "}"
+            "if(!tryWire()){"
+            "var tries=0;"
+            "var iv=setInterval(function(){"
+            "tries++;"
+            "if(tryWire()||tries>80){clearInterval(iv);}"
+            "},50);"
+            "}"
+            "})();"
         )
         return f"<script>{js}</script>"
 
@@ -1281,27 +1440,108 @@ class SQLRunnerCM:
         """
         self._download_result("xlsx")
 
+    def _on_save_csv(self, _btn: Any) -> None:
+        """마지막 실행 결과를 노트북 cwd 에 .csv 파일로 저장."""
+        self._save_result_to_cwd("csv")
+
+    def _on_save_xlsx(self, _btn: Any) -> None:
+        """마지막 실행 결과를 노트북 cwd 에 .xlsx 파일로 저장."""
+        self._save_result_to_cwd("xlsx")
+
+    def _save_result_to_cwd(self, fmt: str) -> None:
+        """결과를 노트북 작업 디렉토리(cwd) 에 파일로 저장.
+
+        다운로드(브라우저 data URI 자동 클릭) 가 아니라 파일시스템에 직접
+        떨어뜨려 후속 셀에서 `pd.read_csv(...)` 로 다시 읽거나 사내 파일
+        공유에 쓰는 워크플로우를 지원. 저장 후 IPython.FileLink 로 경로를
+        클릭 가능 링크로 안내.
+        """
+        from IPython.display import display, HTML, FileLink
+        import datetime
+        import os
+
+        with self._output:
+            self._output.clear_output()
+            df = self._coerce_to_df()
+            if df is None:
+                return
+
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            fname = f"sql_result_{ts}.{fmt}"
+            path = os.path.join(os.getcwd(), fname)
+            try:
+                if fmt == "csv":
+                    # utf-8-sig: Excel 에서 한글 깨짐 없이 열림
+                    df.to_csv(path, index=False, encoding="utf-8-sig")
+                else:
+                    # openpyxl 우선, 없으면 xlsxwriter (다운로드와 동일 로직)
+                    try:
+                        df.to_excel(path, index=False, engine="openpyxl")
+                    except (ImportError, ValueError):
+                        try:
+                            df.to_excel(path, index=False, engine="xlsxwriter")
+                        except (ImportError, ValueError):
+                            print("⚠ Excel 엔진 (openpyxl 또는 xlsxwriter) 미설치.")
+                            print("CSV 저장은 정상 동작합니다.")
+                            return
+            except PermissionError as e:
+                print(f"❌ 저장 실패 (권한 없음): {e}")
+                return
+            except OSError as e:
+                print(f"❌ 저장 실패 (파일시스템): {e}")
+                return
+
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = 0
+            display(HTML(
+                f'<div style="padding:6px 10px;font-size:12px;'
+                f'background:#ecfdf5;border:1px solid #86efac;'
+                f'border-radius:4px;color:#065f46;margin-bottom:4px">'
+                f'✓ 저장 완료 · '
+                f'<code style="background:#fff;padding:1px 4px;'
+                f'border-radius:3px">{escape(path)}</code> '
+                f'({size:,} bytes, {len(df)} rows × {len(df.columns)} cols)'
+                f'</div>'
+            ))
+            # FileLink 는 셀 출력에 클릭 가능 링크를 렌더 — 새 탭에서 파일 보기
+            # 또는 우클릭 → 다른 이름으로 저장으로 원본 그대로 다운로드 가능.
+            display(FileLink(path))
+
+    def _coerce_to_df(self) -> Optional[Any]:
+        """last_result 를 DataFrame 으로 정규화 (CSV/Excel 저장·다운로드 공통).
+
+        반환:
+          pandas.DataFrame  — 정상 변환됨
+          None              — last_result 없음, pandas 미설치, 또는 변환 불가
+        실패 사유는 self._output 에 직접 print (호출 측은 None 만 보고 return).
+        """
+        if self.last_result is None:
+            print("⚠ 다운로드/저장할 결과가 없습니다. ▶ 실행 후 시도해 주세요.")
+            return None
+        try:
+            import pandas as pd
+        except ImportError:
+            print("⚠ pandas 미설치 — CSV/Excel 출력은 pandas 가 필요합니다.")
+            return None
+        df = self.last_result
+        if isinstance(df, list) and df and isinstance(df[0], dict):
+            df = pd.DataFrame(df)
+        if not isinstance(df, pd.DataFrame):
+            print(f"⚠ 결과가 DataFrame/list[dict] 형식이 아니라 출력 불가 "
+                  f"(type={type(df).__name__}).")
+            return None
+        return df
+
     def _download_result(self, fmt: str) -> None:
         from IPython.display import display, HTML
         import base64, datetime, io
 
         with self._output:
             self._output.clear_output()
-            if self.last_result is None:
-                print(f"⚠ 다운로드할 결과가 없습니다. ▶ 실행 후 시도해 주세요.")
-                return
-            # DataFrame 우선, list[dict] 도 자동 변환
-            try:
-                import pandas as pd
-            except ImportError:
-                print("⚠ pandas 미설치 — CSV/Excel 다운로드는 pandas 필요.")
-                return
-            df = self.last_result
-            if isinstance(df, list) and df and isinstance(df[0], dict):
-                df = pd.DataFrame(df)
-            if not isinstance(df, pd.DataFrame):
-                print(f"⚠ 결과가 DataFrame/list[dict] 형식이 아니라 다운로드 불가 "
-                      f"(type={type(df).__name__}).")
+            df = self._coerce_to_df()
+            if df is None:
                 return
 
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
