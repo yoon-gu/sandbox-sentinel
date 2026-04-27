@@ -20,7 +20,7 @@
 | 결과 자동 표 렌더 (모든 컬럼) | ✅ pandas HTML | ✅ Textual DataTable |
 | 후속 분석 | `runner.last_result` / `history` 로 다음 셀 분석 | DataTable 안에서만 |
 | 의존성 | ipywidgets + IPython + CM 인라인 | textual + rich |
-| 파일 크기 | **~285KB** (CM 번들 포함) | ~30KB |
+| 파일 크기 | **~310KB** (CM 번들 포함) | ~30KB |
 
 **언제 005 를 쓰나** — 노트북 안에서 진짜 IDE 같은 편집 체감(에디터 내부 syntax color · 라인 번호 · Ctrl+Space) + 결과를 다음 셀로 넘겨 후속 분석.
 **언제 006 을 쓰나** — ssh / 원격 터미널 친화, Trusted notebook 정책이 부담스럽거나 가장 가벼운 단일 파일을 원할 때.
@@ -38,14 +38,17 @@
 
 - **`SQLRunnerCM(on_execute=fn).show()` 한 줄로 실행 가능 위젯 렌더**
 - **레이아웃** (HBox 좌·우 분할):
-  - 좌: 📚 Entity 트리 — 테이블 헤더 + 컬럼 모두 `ipywidgets.Button`. 클릭 → CM 의 **현재 커서 위치** 에 인서트 (마지막 부분 단어가 prefix 면 자동 치환)
+  - 좌: 📚 Entity 패널 — **단일 HTML 위젯**(검색창 + 테이블 그룹). 위젯 객체(W.Button) 를 만들지 않으므로 **수백 컬럼 스키마도 즉시 렌더**. 검색창에 입력하면 JS 자체 필터로 매치되는 테이블/컬럼만 즉석 표시 (Python round-trip 0). 클릭 → CM 의 **현재 커서 위치** 에 인서트 (마지막 부분 단어가 prefix 면 자동 치환)
   - 우: SQL Runner 패널
     - **CodeMirror 5 에디터** — SQL mode + dracula 다크 테마 + 라인 번호 + 라인 wrap + 자동 들여쓰기
     - 컨텍스트 인식 자동완성 popup (Ctrl/Cmd+Space, 식별자 입력 시 자동)
-    - **💡 추천 칩 패널** — popup 과 별개로 항상 보이는 컨텍스트 칩 (005 와 동일 컨셉). 클릭 시 CM 의 커서 위치에 인서트
-    - **`▶ 실행`** / `📋 SQL 복사` / `🗑 지우기` 버튼
+    - **💡 추천 칩 패널** — popup 과 별개로 항상 보이는 컨텍스트 칩. 클릭 시 CM 의 커서 위치에 인서트
+    - **`▶ 실행`** / `⬇ CSV·Excel 다운로드` (브라우저) / **`💾 CSV·Excel 파일 저장`** (cwd) / `🗑 지우기` 버튼
     - 📤 Output 위젯 — DataFrame 의 **모든 컬럼** 까지 잘리지 않고 표 렌더 (`pd.option_context` 적용)
     - **단축키**: Cmd/Ctrl+Enter = ▶ 실행, Ctrl/Cmd+Space = 자동완성, Tab = 들여쓰기
+- **결과 출력 두 가지 경로**:
+  - `⬇ CSV / Excel 다운로드` — base64 data URI + 자동 클릭 → 브라우저 다운로드 폴더로. 클립보드 차단 환경에서도 동작.
+  - **`💾 CSV / Excel 파일 저장`** — 노트북 작업 디렉토리(`os.getcwd()`) 에 `sql_result_<ts>.csv`/`.xlsx` 로 직접 저장 후 `IPython.FileLink` 로 클릭 가능 링크 안내. **다음 셀에서 `pd.read_csv(...)` 로 다시 읽거나 사내 파일 공유에 사용** 하기 좋음.
 - **컨텍스트 인식 자동완성** (005 의 anchor 정책을 JS + Python 양쪽으로 재현):
   - `FROM` / `JOIN` 다음 → 테이블
   - `SELECT` 다음 → 컬럼 + `*` + 함수
@@ -173,7 +176,7 @@ runner.show()
 ```
 005-sql-codemirror-runner/
 ├── README.md
-├── sql_codemirror.py        # ⭐ single-file 반입 단위 (~270KB, CM 인라인 포함)
+├── sql_codemirror.py        # ⭐ single-file 반입 단위 (~310KB, CM 인라인 포함)
 ├── metadata.json
 ├── LICENSE                  # MIT (CodeMirror 원본 라이선스 복제)
 ├── _build.py                # (build only) 자산 → single-file 생성기
@@ -206,7 +209,7 @@ runner.show()
 ## 알려진 제약 / 한계
 
 - **Trusted notebook 필요** — JupyterLab 의 untrusted 노트북에서는 인라인 `<script>` 가 차단되어 CodeMirror 가 mount 되지 않음 (`File → Trust Notebook`). 이 환경 제약이 부담이라면 **006 (Textual TUI)** 사용 권장.
-- **파일 크기 ~285KB** — TUI 변환물(006, ~30KB) 보다 약 9배. 보안 검토 분량이 늘어남. 다만 **CodeMirror MIT 라이선스 한 건만 추가 검토** 하면 끝.
+- **파일 크기 ~310KB** — TUI 변환물(006, ~30KB) 보다 약 9배. 보안 검토 분량이 늘어남. 다만 **CodeMirror MIT 라이선스 한 건만 추가 검토** 하면 끝.
 - **CodeMirror 5 (legacy)** — v6 가 아닌 v5 를 의도적으로 선택. v6 는 ESM 번들러(rollup/esbuild) 가 필요해 raw-string 인라인이 사실상 불가. v5 는 단일 IIFE 번들이라 인라인 적합. v5 는 유지보수 모드지만 SQL 모드/show-hint 만 쓰는 본 용도엔 충분.
 - **CTE / 서브쿼리 alias 미지원** — 다음과 같은 패턴은 자동완성 매핑이 안 됨 (TODO):
   - `WITH cte AS (...)` — CTE 본명 / 컬럼 추론. 명시 컬럼 리스트 (`WITH cte(a, b) AS ...`) 와 단순 SELECT 리스트만 우선 다루는 식으로 단계적 구현 가능. 별칭 없는 표현식·`SELECT *` 처리 등 부작용을 따져야 해 보류.
