@@ -1238,6 +1238,7 @@ class SQLRunnerCM:
         self._suggest_box = None
         self._validate_box = None   # ❌ + 메시지 표시 위젯 (성공 시 비어있음)
         self._run_btn = None        # ▶ 실행 버튼 (검증 결과에 따라 disabled 토글)
+        self._clear_hist_pending = False   # 🗑 history 비우기 두 번 클릭 상태
         self._uid = "u" + uuid.uuid4().hex[:10]
 
     # ----- history 파일 영속화 -----
@@ -1497,20 +1498,28 @@ class SQLRunnerCM:
         save_xlsx_btn = W.Button(description="💾 Excel 파일 저장",
                                  tooltip="cwd 에 sql_result_<ts>.xlsx 저장",
                                  layout=W.Layout(width="auto"))
-        clear_btn = W.Button(description="🗑 지우기",
+        clear_btn = W.Button(description="🗑 에디터 비우기",
                              layout=W.Layout(width="auto"))
+        # 🗑 history 비우기 — 두 번 클릭 확인 후 in-memory + 파일 모두 삭제
+        clear_hist_btn = W.Button(
+            description="🗑 history 비우기",
+            tooltip=("누적 history 와 .sql_runner_history 파일을 모두 비움. "
+                     "두 번 클릭 시 확정 (5초 내)."),
+            layout=W.Layout(width="auto"),
+        )
         run_btn.on_click(self._on_run)
         csv_btn.on_click(self._on_download_csv)
         xlsx_btn.on_click(self._on_download_xlsx)
         save_csv_btn.on_click(self._on_save_csv)
         save_xlsx_btn.on_click(self._on_save_xlsx)
         clear_btn.on_click(self._on_clear)
+        clear_hist_btn.on_click(self._on_clear_history)
 
         self._run_box = W.HBox([run_btn], layout=W.Layout(padding="0"))
         self._run_box.add_class(f"cm-run-{self._uid}")
         actions = W.HBox(
             [self._run_box, csv_btn, xlsx_btn,
-             save_csv_btn, save_xlsx_btn, clear_btn],
+             save_csv_btn, save_xlsx_btn, clear_btn, clear_hist_btn],
             layout=W.Layout(padding="4px 0", flex_flow="row wrap"),
         )
 
@@ -1958,6 +1967,28 @@ class SQLRunnerCM:
         if self._suggest_box is not None:
             self._suggest_box.children = children
 
+    def clear_history(self) -> None:
+        """누적 history 를 in-memory 와 파일 모두에서 제거.
+
+        - ``self.history`` 리스트 비움
+        - ``history_dir`` 안의 모든 ``*.jsonl`` 파일 삭제
+        - ``last_query`` / ``last_result`` / ``last_error`` 는 의도적으로
+          유지 (직전 결과는 다음 셀 분석 흐름에서 여전히 유용)
+        """
+        import os
+        self.history.clear()
+        if self.history_dir and os.path.isdir(self.history_dir):
+            try:
+                files = list(os.listdir(self.history_dir))
+            except OSError:
+                files = []
+            for fname in files:
+                if fname.endswith(".jsonl"):
+                    try:
+                        os.remove(os.path.join(self.history_dir, fname))
+                    except OSError:
+                        pass
+
     def execute(self, sql: str) -> Any:
         """SQL 을 실행하고 history 에 누적. ``show()`` 의 ▶ 실행 버튼과
         동일한 동작을 노트북 외부 코드에서 호출 가능하게 노출.
@@ -2267,6 +2298,50 @@ class SQLRunnerCM:
                 "})();</script>"
             ))
             self._output.clear_output()
+
+    def _on_clear_history(self, btn: Any) -> None:
+        """🗑 history 비우기 — 두 번 클릭 확인 패턴.
+
+        첫 클릭: 버튼이 빨간 'danger' 로 변하며 '⚠ 정말? 다시 클릭' 표시.
+        두 번째 클릭 (5초 이내): 확정 → ``clear_history()`` 호출.
+        5초 후엔 상태 자동 reset.
+        """
+        import threading
+        import time
+        # 두 번째 클릭 — 확정
+        if getattr(self, "_clear_hist_pending", False):
+            self._clear_hist_pending = False
+            n = len(self.history)
+            self.clear_history()
+            btn.description = "🗑 history 비우기"
+            btn.button_style = ""
+            if self._output is not None:
+                with self._output:
+                    self._output.clear_output()
+                    print(f"✓ history {n} 건 + 파일 모두 삭제됨.")
+            return
+        # 첫 클릭 — 확인 대기
+        n = len(self.history)
+        if n == 0:
+            if self._output is not None:
+                with self._output:
+                    self._output.clear_output()
+                    print("(이미 비어있습니다)")
+            return
+        self._clear_hist_pending = True
+        btn.description = (
+            f"⚠ 정말 {n}건 모두 지울까요? 다시 클릭하면 확정 (5초 내)"
+        )
+        btn.button_style = "danger"
+
+        def _reset() -> None:
+            time.sleep(5)
+            if getattr(self, "_clear_hist_pending", False):
+                self._clear_hist_pending = False
+                btn.description = "🗑 history 비우기"
+                btn.button_style = ""
+
+        threading.Thread(target=_reset, daemon=True).start()
 
 
 # ===== __main__ =====
