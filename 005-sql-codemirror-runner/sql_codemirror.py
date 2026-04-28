@@ -636,15 +636,23 @@ _JOIN_RE = re.compile(
 )
 
 
-def extract_aliases(text: str, tables: Mapping[str, list]) -> dict:
-    """``FROM <t> [AS] <alias>``, ``JOIN <t> [AS] <alias>`` 스캔.
+def extract_aliases(text: str,
+                    tables: Mapping[str, Mapping[str, list]]) -> dict:
+    """``FROM <t> [AS] <alias>``, ``JOIN <t> [AS] <alias>`` 스캔 (다중 schema).
 
     지원하는 패턴:
       · ``FROM orders``, ``FROM orders o``, ``FROM orders AS o``
       · ``FROM orders o, users u`` (콤마 join — 두 번째 이후도 인식)
-      · ``FROM public.orders AS o`` (schema-qualified — 마지막 segment 만)
-      · ``JOIN events AS e``, ``JOIN public.events e`` (스키마 포함)
-    본명도 자기 자신에 매핑되어 'orders.' / 'o.' 둘 다 동작.
+      · ``FROM public.orders AS o`` (schema 명시 — schema/table 모두 매칭)
+      · ``JOIN events AS e``, ``JOIN public.events e``
+
+    Returns:
+        매핑 ``alias_or_name → (schema, table_name)``.
+        - 본명만 친 경우 (`orders`) 도 자기 자신에 매핑되어 'orders.' / 'o.'
+          모두 동작.
+        - 동명 테이블이 여러 schema 에 있을 때 schema 미지정이면 가장 먼저
+          발견된 schema 로 결정 (사용자는 모호함을 피하려면 ``schema.table``
+          로 명시 권장).
     """
     s = re.sub(r"--[^\n]*", " ", text)
     s = re.sub(r"/\*.*?\*/", " ", s, flags=re.DOTALL)
@@ -652,14 +660,31 @@ def extract_aliases(text: str, tables: Mapping[str, list]) -> dict:
     s = re.sub(r'"[^"]*"', " ", s)
     aliases: dict = {}
 
+    def _resolve(tname_full: str) -> Optional[tuple[str, str]]:
+        """``schema.table`` 또는 bare ``table`` 을 (schema, name) 으로 해소."""
+        if "." in tname_full:
+            sch, name = tname_full.split(".", 1)
+            if sch in tables and name in tables[sch]:
+                return sch, name
+            return None
+        # bare name → 모든 schema 순회 (먼저 매칭된 것 사용)
+        for sch in tables:
+            if tname_full in tables[sch]:
+                return sch, tname_full
+        return None
+
     def _register(tname_full: str, alias: Optional[str]) -> None:
-        # schema-qualified 면 마지막 segment 사용
-        tname = tname_full.split(".")[-1]
-        if tname not in tables:
+        resolved = _resolve(tname_full)
+        if resolved is None:
             return
-        aliases[tname] = tname
+        sch, name = resolved
+        # 본명/명시이름/alias 모두 (schema, name) 으로 매핑
+        aliases[name] = resolved
+        # schema-qualified 입력 (`public.orders`) 도 prefix 키로 매핑
+        if "." in tname_full:
+            aliases[tname_full] = resolved
         if alias and alias.upper() not in _NOT_ALIAS:
-            aliases[alias] = tname
+            aliases[alias] = resolved
 
     # FROM clause — 다음 절 키워드 전까지 잘라 콤마 list 처리
     for m in _FROM_RE.finditer(s):
@@ -682,13 +707,14 @@ def extract_aliases(text: str, tables: Mapping[str, list]) -> dict:
     return aliases
 
 
-def get_suggestions(text: str, tables: Mapping[str, list],
-                     full_text: Optional[str] = None) -> list:
-    """현재 컨텍스트에 맞는 추천 후보 리스트 (텍스트 끝 기준).
+def get_suggestions(text: str,
+                    tables: Mapping[str, Mapping[str, list]],
+                    full_text: Optional[str] = None) -> list:
+    """현재 컨텍스트에 맞는 추천 후보 리스트 (텍스트 끝 기준, 다중 schema).
 
     Args:
         text: cursor 까지의 텍스트 (컨텍스트 감지에 사용).
-        tables: 스키마 매핑.
+        tables: ``{schema: {table_name: columns}}`` 중첩 매핑.
         full_text: 전체 SQL 문서. alias 추출에 사용. None 이면 ``text``.
             SELECT 절(FROM 보다 앞)에서도 'o.' / 'e.' 가 동작하려면
             반드시 전체 텍스트를 넘겨야 함.
@@ -698,45 +724,103 @@ def get_suggestions(text: str, tables: Mapping[str, list],
     last_word = m.group(1) if m else ""
     last_lower = last_word.lower()
 
-    # table_or_alias. qualifier 우선
+    # 동명 테이블이 여러 schema 에 있을 때 disambiguation 용 카운트
+    name_counts: dict[str, int] = {}
+    for sch_name in tables:
+        for tn in tables[sch_name]:
+            name_counts[tn] = name_counts.get(tn, 0) + 1
+
+    # ── qualifier (점 포함) 우선 처리 ──
+    # 1 dot:  ``alias.col`` / ``table.col`` / ``schema.table``
+    # 2 dot:  ``schema.table.col``
     if "." in last_word:
-        dot_idx = last_word.index(".")
-        qual = last_word[:dot_idx]
-        col_prefix = last_word[dot_idx + 1:].lower()
-        # 본명/AS alias 모두 매핑. alias 추출은 전체 문서 기준 — SELECT 절
-        # 처럼 FROM 보다 앞에 있을 때도 뒤쪽 FROM/JOIN 을 보고 매핑해야 함.
-        aliases = extract_aliases(full_text if full_text is not None else text, tables)
-        real = aliases.get(qual)
-        if real and real in tables:
+        parts = last_word.split(".")
+        # 2-dot: schema.table.col → 해당 schema/table 의 컬럼 추천
+        if len(parts) >= 3:
+            sch, tname, col_prefix = parts[0], parts[1], parts[2].lower()
+            if sch in tables and tname in tables[sch]:
+                return [
+                    {
+                        "value": f"{sch}.{tname}.{c['name']}",
+                        "label": (f"{c['name']} {_short_type(c.get('type',''))}"
+                                  if c.get("type") else c["name"]),
+                        "kind": "column",
+                        "meta": c.get("type", "") or f"{sch}.{tname}",
+                    }
+                    for c in tables[sch][tname]
+                    if c["name"].lower().startswith(col_prefix)
+                ][:30]
+        # 1-dot
+        qual, fp = parts[0], parts[1].lower()
+        # (a) qual 이 schema 면 해당 schema 의 테이블 후보
+        if qual in tables:
             return [
                 {
-                    "value": f"{qual}.{c['name']}",   # 사용자가 친 그대로 인서트
+                    "value": f"{qual}.{tn}",
+                    "label": tn,
+                    "kind": "table",
+                    "meta": f"{qual}",
+                }
+                for tn in sorted(tables[qual].keys())
+                if tn.lower().startswith(fp)
+            ][:30]
+        # (b) qual 이 alias 또는 table 명 → 컬럼 추천
+        aliases = extract_aliases(
+            full_text if full_text is not None else text, tables)
+        resolved = aliases.get(qual)
+        if resolved is not None:
+            sch, tname = resolved
+            return [
+                {
+                    "value": f"{qual}.{c['name']}",
                     "label": (f"{c['name']} {_short_type(c.get('type',''))}"
                               if c.get("type") else c["name"]),
                     "kind": "column",
-                    "meta": c.get("type", "") or real,
+                    "meta": c.get("type", "") or f"{sch}.{tname}",
                 }
-                for c in tables[real]
-                if c["name"].lower().startswith(col_prefix)
+                for c in tables[sch][tname]
+                if c["name"].lower().startswith(fp)
             ][:30]
 
     cands: list = []
+    multi_schema = len(tables) > 1
+
     if ctx in ("tables", "general", "start"):
-        for tname in tables.keys():
-            cands.append({"value": tname, "label": tname,
-                          "kind": "table", "meta": "table"})
+        # 다중 schema 일 때만 schema 후보를 먼저 노출 (단일 schema 는 부담 0)
+        if multi_schema:
+            for sch in sorted(tables.keys()):
+                cands.append({
+                    "value": f"{sch}.",   # 인서트 시 점까지 — 사용자는 이어서 테이블명 입력
+                    "label": f"📁 {sch}",
+                    "kind": "schema",
+                    "meta": f"schema · {len(tables[sch])} tables",
+                })
+        # bare table 후보 — 동명 충돌 시 schema. prefix 로 disambiguate
+        for sch, tname, _cols in _iter_tables(tables):
+            if multi_schema and name_counts.get(tname, 0) > 1:
+                value = f"{sch}.{tname}"
+                label = value
+            else:
+                value = tname
+                label = tname
+            cands.append({"value": value, "label": label,
+                          "kind": "table", "meta": sch if multi_schema else "table"})
     if ctx in ("columns", "columns_or_star", "general", "start"):
         seen: set = set()
-        for tname, cols in tables.items():
+        for sch, tname, cols in _iter_tables(tables):
             for c in cols:
                 if c["name"] in seen:
                     continue
                 seen.add(c["name"])
                 type_str = c.get("type", "") or ""
-                # 추천 표시 라벨에 짧은 타입 이모지 동시 노출 ("id 🔢")
                 col_label = (f"{c['name']} {_short_type(type_str)}"
                               if type_str else c["name"])
-                meta = (type_str + " · " if type_str else "") + tname
+                # 동명 테이블이 여러 schema 에 있으면 meta 도 schema.table
+                if multi_schema and name_counts.get(tname, 0) > 1:
+                    src = f"{sch}.{tname}"
+                else:
+                    src = tname
+                meta = (type_str + " · " if type_str else "") + src
                 cands.append({"value": c["name"], "label": col_label,
                               "kind": "column", "meta": meta})
     if ctx == "columns_or_star":
@@ -768,6 +852,13 @@ def get_suggestions(text: str, tables: Mapping[str, list],
     if last_lower:
         cands = [c for c in cands if last_lower in c["label"].lower()]
     return cands[:30]
+
+
+def _iter_tables(tables: Mapping[str, Mapping[str, list]]):
+    """``{schema:{name:cols}}`` 를 (schema, name, cols) 로 평탄화 (sorted)."""
+    for sch in sorted(tables.keys()):
+        for tn in sorted(tables[sch].keys()):
+            yield sch, tn, tables[sch][tn]
 
 
 # ===== SQL 타입명 → 짧은 이모지 매핑 =====
@@ -1513,7 +1604,45 @@ _BOOTSTRAP_JS_TPL = r"""
     window["__cmEditor_" + UID] = cm;
   }}
 
-  // FROM/JOIN <table> [AS] <alias> 를 스캔해 alias → 실 테이블 매핑.
+  // ── 다중 schema 헬퍼 ──
+  // SCHEMA = {{ schemaName: {{ tableName: [cols] }} }}
+  function listSchemas(){{ return Object.keys(SCHEMA).sort(); }}
+  function isMultiSchema(){{ return listSchemas().length > 1; }}
+  function tablesIn(sch){{
+    return SCHEMA[sch] ? Object.keys(SCHEMA[sch]).sort() : [];
+  }}
+  // 모든 schema 를 순회하며 (schema, name, cols) 평탄화
+  function iterTables(){{
+    var out = [];
+    listSchemas().forEach(function(sch){{
+      tablesIn(sch).forEach(function(tn){{
+        out.push({{ schema: sch, name: tn, cols: SCHEMA[sch][tn] }});
+      }});
+    }});
+    return out;
+  }}
+  // 동명 테이블이 몇 개 schema 에 분포하는지 (disambiguation 판단용)
+  function nameCounts(){{
+    var c = {{}};
+    iterTables().forEach(function(t){{ c[t.name] = (c[t.name]||0) + 1; }});
+    return c;
+  }}
+  // bare name → (schema, name) 해소. 충돌 시 첫 매치.
+  function findTable(name){{
+    var schemas = listSchemas();
+    for(var i = 0; i < schemas.length; i++){{
+      if(SCHEMA[schemas[i]] && SCHEMA[schemas[i]][name]){{
+        return {{ schema: schemas[i], name: name }};
+      }}
+    }}
+    return null;
+  }}
+  // 컬럼 배열 lookup (schema, name)
+  function colsOf(sch, name){{
+    return (SCHEMA[sch] && SCHEMA[sch][name]) ? SCHEMA[sch][name] : null;
+  }}
+
+  // FROM/JOIN <table> [AS] <alias> 를 스캔해 alias → {{schema, name}} 매핑.
   // Python extract_aliases 와 동일 정책. 콤마 join + schema-qualified 지원.
   var NOT_ALIAS = {{
     "WHERE":1,"ON":1,"GROUP":1,"ORDER":1,"HAVING":1,"LIMIT":1,"JOIN":1,
@@ -1531,13 +1660,24 @@ _BOOTSTRAP_JS_TPL = r"""
       .replace(/"[^"]*"/g," ");
     var aliases = {{}};
 
+    function resolve(tnameFull){{
+      if(tnameFull.indexOf(".") >= 0){{
+        var p = tnameFull.split(".");
+        var sch = p[0], name = p[1];
+        if(SCHEMA[sch] && SCHEMA[sch][name]) return {{ schema: sch, name: name }};
+        return null;
+      }}
+      return findTable(tnameFull);
+    }}
+
     function register(tnameFull, alias){{
-      var parts = tnameFull.split(".");
-      var tname = parts[parts.length - 1];   // schema-qualified → 마지막
-      if(!SCHEMA[tname]) return;
-      aliases[tname] = tname;
+      var resolved = resolve(tnameFull);
+      if(!resolved) return;
+      // 본명·schema.name·alias 모두 같은 (schema, name) 으로 매핑
+      aliases[resolved.name] = resolved;
+      if(tnameFull.indexOf(".") >= 0) aliases[tnameFull] = resolved;
       if(alias && !NOT_ALIAS[alias.toUpperCase()]){{
-        aliases[alias] = tname;
+        aliases[alias] = resolved;
       }}
     }}
 
@@ -1639,6 +1779,20 @@ _BOOTSTRAP_JS_TPL = r"""
     return CTX_MAP[last] || "general";
   }}
 
+  // schema 후보 클릭 후 popup 자동 재호출 — `public.` 인서트 직후 그
+  // schema 의 테이블 후보가 즉시 뜨도록. CodeMirror 5 의 hint 객체에
+  // hint(cm, data, completion) 을 주면 default 인서트를 대체 가능.
+  function makeSchemaPicker(sch){{
+    return function(cm, data, completion){{
+      cm.replaceRange(sch + ".", completion.from, completion.to);
+      // 인서트가 끝난 다음 tick 에 다시 popup — completionActive 검사로 중복 방지
+      setTimeout(function(){{
+        if(cm.state && cm.state.completionActive) return;
+        cm.showHint({{ hint: contextHint, completeSingle: false }});
+      }}, 0);
+    }};
+  }}
+
   function contextHint(cm){{
     var cur = cm.getCursor();
     var line = cm.getLine(cur.line);
@@ -1653,25 +1807,55 @@ _BOOTSTRAP_JS_TPL = r"""
     // cursor 위치까지 반영되어야 정확.
     var beforeAll = cm.getRange({{line:0,ch:0}}, cur);
     var ctx = detectContext(beforeAll);
+    var multi = isMultiSchema();
+    var counts = nameCounts();
 
-    // table_or_alias. qualifier 우선 처리
-    // alias 추출은 cursor 까지가 아닌 **전체 문서** 를 스캔 — SELECT 절에서
-    // FROM 보다 앞 위치에 있을 때도 뒤쪽 'FROM x AS o' 가 인식되어야 함.
-    var dot = word.indexOf(".");
-    if(dot > 0){{
-      var qual = word.substring(0, dot);
-      var fp = word.substring(dot+1).toLowerCase();
+    // ── qualifier 처리 (점 포함 word) ──
+    // 1 dot:  schema.col_or_table  /  alias.col  /  table.col
+    // 2 dot:  schema.table.col
+    var dotCount = (word.match(/\./g) || []).length;
+    if(dotCount >= 2){{
+      // schema.table.col → schema/table 이 실재하면 그 컬럼 추천
+      var pp = word.split(".");
+      var sch2 = pp[0], tn2 = pp[1], cp2 = pp.slice(2).join(".").toLowerCase();
+      var cols2 = colsOf(sch2, tn2);
+      if(cols2){{
+        var list2 = cols2
+          .filter(function(c){{ return c.name.toLowerCase().indexOf(cp2) === 0; }})
+          .map(function(c){{
+            var disp = c.type ? (c.name + " " + shortType(c.type)) : c.name;
+            return {{ text: sch2 + "." + tn2 + "." + c.name, displayText: disp }};
+          }});
+        return {{ list: list2, from: CodeMirror.Pos(cur.line, start),
+                 to: CodeMirror.Pos(cur.line, end) }};
+      }}
+    }}
+    if(dotCount === 1){{
+      var di = word.indexOf(".");
+      var qual = word.substring(0, di);
+      var fp = word.substring(di+1).toLowerCase();
+      // (a) qual 이 schema 이면 그 schema 의 테이블 후보
+      if(SCHEMA[qual]){{
+        var tlist = tablesIn(qual)
+          .filter(function(tn){{ return tn.toLowerCase().indexOf(fp) === 0; }})
+          .map(function(tn){{
+            return {{ text: qual + "." + tn,
+                     displayText: tn + "  · table" }};
+          }});
+        return {{ list: tlist, from: CodeMirror.Pos(cur.line, start),
+                 to: CodeMirror.Pos(cur.line, end) }};
+      }}
+      // (b) qual 이 alias 또는 table 이면 그 테이블의 컬럼 후보
       var aliases = extractAliases(cm.getValue());
-      var real = aliases[qual];
-      if(real && SCHEMA[real]){{
-        var list = SCHEMA[real]
+      var resolved = aliases[qual];
+      if(resolved && colsOf(resolved.schema, resolved.name)){{
+        var clist = colsOf(resolved.schema, resolved.name)
           .filter(function(c){{ return c.name.toLowerCase().indexOf(fp) === 0; }})
           .map(function(c){{
-            // 표시 라벨에 짧은 타입 이모지 ("id 🔢")
             var disp = c.type ? (c.name + " " + shortType(c.type)) : c.name;
             return {{ text: qual + "." + c.name, displayText: disp }};
           }});
-        return {{ list: list, from: CodeMirror.Pos(cur.line, start),
+        return {{ list: clist, from: CodeMirror.Pos(cur.line, start),
                  to: CodeMirror.Pos(cur.line, end) }};
       }}
     }}
@@ -1680,21 +1864,40 @@ _BOOTSTRAP_JS_TPL = r"""
     var seenCol = {{}};
 
     if(ctx === "tables" || ctx === "general" || ctx === "start"){{
-      Object.keys(SCHEMA).forEach(function(tname){{
-        cands.push({{ text: tname,
-                     displayText: tname + "  · table" }});
+      // 다중 schema 일 때만 schema 후보를 가장 위에 노출 — schema-first 흐름.
+      // schema 선택 시 hint() 콜백이 popup 을 자동 재호출해 그 schema 의
+      // 테이블 후보를 즉시 보여줌.
+      if(multi){{
+        listSchemas().forEach(function(sch){{
+          var n = tablesIn(sch).length;
+          cands.push({{
+            text: sch + ".",
+            displayText: "📁 " + sch + "  · schema (" + n + ")",
+            hint: makeSchemaPicker(sch)
+          }});
+        }});
+      }}
+      // bare table 후보 — schema 후보 다음. 동명 충돌은 schema. prefix
+      iterTables().forEach(function(t){{
+        var ambiguous = multi && counts[t.name] > 1;
+        var txt = ambiguous ? (t.schema + "." + t.name) : t.name;
+        var meta = multi ? t.schema : "table";
+        cands.push({{ text: txt,
+                     displayText: txt + "  · " + meta }});
       }});
     }}
     if(ctx === "columns" || ctx === "columns_or_star" ||
        ctx === "general" || ctx === "start"){{
-      Object.keys(SCHEMA).forEach(function(tname){{
-        SCHEMA[tname].forEach(function(c){{
+      iterTables().forEach(function(t){{
+        t.cols.forEach(function(c){{
           if(seenCol[c.name]) return;
           seenCol[c.name] = 1;
-          // 컬럼 추천 표시: "id 🔢  · users" 형태 (타입은 짧은 이모지)
+          // 동명 테이블이 여러 schema 에 있으면 표시도 schema.table 로
+          var src = (multi && counts[t.name] > 1)
+            ? (t.schema + "." + t.name) : t.name;
           var disp = c.type
-            ? (c.name + " " + shortType(c.type) + "  · " + tname)
-            : (c.name + "  · " + tname);
+            ? (c.name + " " + shortType(c.type) + "  · " + src)
+            : (c.name + "  · " + src);
           cands.push({{ text: c.name, displayText: disp }});
         }});
       }});
@@ -1770,8 +1973,13 @@ class SQLRunnerCM:
                 ``".sql_runner_history"`` 는 노트북 디렉토리에 dotted 폴더
                 생성 → 다음 노트북 세션에서 자동 로드되어 history 가 이어짐.
         """
-        self.tables: dict[str, list[dict]] = {}
-        self.notes: dict[str, str] = {}
+        # 다중 schema 지원: schema → table_name → columns
+        # 단일 schema 사용 시 자연스럽게 "main" 한 그룹만 사용됨.
+        self.tables: dict[str, dict[str, list[dict]]] = {}
+        # note 는 (schema, table) 복합 키로 보관해 동명 테이블 충돌을 회피
+        self.notes: dict[tuple[str, str], str] = {}
+        # 단일 schema 사용자에게 시각적 부담을 주지 않기 위한 기본값
+        self.default_schema: str = "main"
         self.initial_query: str = ""
         self.on_execute = on_execute
         self.on_validate = on_validate or validate_sql
@@ -1932,23 +2140,47 @@ class SQLRunnerCM:
         runner.from_sqlite(db_path)
         return runner
 
-    # ----- 스키마 등록 (005 와 동일 API) -----
+    # ----- 스키마 등록 -----
+    #
+    # 다중 schema 지원: 모든 등록 함수가 ``schema=`` 인자를 받는다 (기본값
+    # ``"main"`` — SQLite 관례). 단일 schema 만 쓰면 사이드바에는 schema
+    # 헤더가 숨고 기존 005 와 동일한 모양이 된다. 두 개 이상 등록되면
+    # 사이드바가 schema 별로 그룹핑되고, 자동완성도 schema-first 로 동작.
 
     def add_table(self, name: str,
                   columns: Iterable[ColumnSpec],
-                  description: str = "") -> "SQLRunnerCM":
-        self.tables[name] = [_normalize_column(c) for c in columns]
+                  description: str = "",
+                  schema: Optional[str] = None) -> "SQLRunnerCM":
+        """단일 테이블 등록.
+
+        Args:
+            name: 테이블명 (schema 제외 — 점이 포함되어 있어도 분해하지 않음).
+            columns: 컬럼 스펙 iterable. ``_normalize_column`` 으로 정규화됨.
+            description: 사이드바 hover tooltip 으로 노출될 한 줄 설명.
+            schema: 소속 schema. ``None`` 이면 ``self.default_schema`` ("main").
+        """
+        sch = schema or self.default_schema
+        bucket = self.tables.setdefault(sch, {})
+        bucket[name] = [_normalize_column(c) for c in columns]
         if description:
-            self.notes[name] = description
+            self.notes[(sch, name)] = description
         return self
 
     def from_dict(self,
-                  schema: Mapping[str, Iterable[ColumnSpec]]) -> "SQLRunnerCM":
-        for tname, cols in schema.items():
-            self.add_table(tname, cols)
+                  tables: Mapping[str, Iterable[ColumnSpec]],
+                  schema: Optional[str] = None) -> "SQLRunnerCM":
+        """``{table_name: columns, ...}`` dict 를 한 schema 에 일괄 등록."""
+        for tname, cols in tables.items():
+            self.add_table(tname, cols, schema=schema)
         return self
 
-    def from_sqlite(self, path: str) -> "SQLRunnerCM":
+    def from_sqlite(self, path: str,
+                    schema: Optional[str] = None) -> "SQLRunnerCM":
+        """SQLite DB 파일에서 테이블/컬럼을 자동 등록.
+
+        다중 schema 가 필요하면 두 번 호출하여 다른 ``schema=`` 로 등록.
+        """
+        sch = schema or self.default_schema
         conn = sqlite3.connect(path)
         try:
             cur = conn.cursor()
@@ -1958,6 +2190,7 @@ class SQLRunnerCM:
                 "ORDER BY name"
             )
             tnames = [row[0] for row in cur.fetchall()]
+            bucket = self.tables.setdefault(sch, {})
             for t in tnames:
                 cur.execute(f"PRAGMA table_info({t})")
                 cols: list[ColumnSpec] = []
@@ -1967,13 +2200,17 @@ class SQLRunnerCM:
                         "type": ctype or "",
                         "doc": "PK" if pk else "",
                     })
-                self.tables[t] = [_normalize_column(c) for c in cols]
+                bucket[t] = [_normalize_column(c) for c in cols]
         finally:
             conn.close()
         return self
 
     def from_dataframes(self,
-                        dataframes: Mapping[str, Any]) -> "SQLRunnerCM":
+                        dataframes: Mapping[str, Any],
+                        schema: Optional[str] = None) -> "SQLRunnerCM":
+        """``{table_name: DataFrame, ...}`` dict 를 한 schema 에 등록."""
+        sch = schema or self.default_schema
+        bucket = self.tables.setdefault(sch, {})
         for name, df in dataframes.items():
             cols: list[ColumnSpec] = []
             try:
@@ -1984,8 +2221,24 @@ class SQLRunnerCM:
                 raise TypeError(
                     f"from_dataframes 의 값은 pandas.DataFrame 이어야 합니다 ({name})"
                 ) from e
-            self.tables[name] = [_normalize_column(c) for c in cols]
+            bucket[name] = [_normalize_column(c) for c in cols]
         return self
+
+    # ----- 다중 schema 헬퍼 (UI · 자동완성에서 공용) -----
+
+    def _iter_all_tables(self) -> Iterable[tuple[str, str, list[dict]]]:
+        """모든 (schema, table_name, columns) 를 schema → name 순으로 yield."""
+        for sch in sorted(self.tables.keys()):
+            for tname in sorted(self.tables[sch].keys()):
+                yield sch, tname, self.tables[sch][tname]
+
+    def _table_name_counts(self) -> dict[str, int]:
+        """동명 테이블이 몇 개 schema 에 분포하는지 — disambiguation 용."""
+        counts: dict[str, int] = {}
+        for sch in self.tables:
+            for tname in self.tables[sch]:
+                counts[tname] = counts.get(tname, 0) + 1
+        return counts
 
     def set_query(self, query: str) -> "SQLRunnerCM":
         self.initial_query = query
@@ -2187,11 +2440,14 @@ class SQLRunnerCM:
         )
 
     def _cm_bootstrap_html(self) -> str:
-        # 스키마 → JS 객체 (table → [{name,type,doc}])
+        # 다중 schema → JS 객체 (schema → table → [{name,type,doc}])
         schema_for_js = {
-            tname: [{"name": c["name"], "type": c.get("type", ""),
-                     "doc": c.get("doc", "")} for c in cols]
-            for tname, cols in self.tables.items()
+            sch: {
+                tname: [{"name": c["name"], "type": c.get("type", ""),
+                         "doc": c.get("doc", "")} for c in cols]
+                for tname, cols in tables.items()
+            }
+            for sch, tables in self.tables.items()
         }
         js = _BOOTSTRAP_JS_TPL.format(
             uid=self._uid,
@@ -2265,6 +2521,22 @@ class SQLRunnerCM:
             f"#entity-panel-{uid} .ep-no-match{{"
             f"display:none;padding:8px 12px;"
             f"color:#888;font-size:11px;font-style:italic}}"
+            # 다중 schema 일 때 schema 그룹 헤더
+            f"#entity-panel-{uid} .ep-schema{{margin-top:4px}}"
+            f"#entity-panel-{uid} .ep-schema-hdr{{"
+            f"display:block;width:100%;padding:5px 10px;"
+            f"background:#e7eef5;border-top:1px solid #d8dde1;"
+            f"border-bottom:1px solid #d8dde1;"
+            f"font-weight:600;font-size:11px;color:#0369a1;"
+            f"cursor:pointer;text-align:left;"
+            f"border-left:none;border-right:none}}"
+            f"#entity-panel-{uid} .ep-schema-hdr:hover{{background:#dbe6f0}}"
+            f"#entity-panel-{uid} .ep-schema.collapsed .ep-tbl{{display:none}}"
+            f"#entity-panel-{uid} .ep-schema-caret{{"
+            f"display:inline-block;width:10px;color:#6c757d;"
+            f"transition:transform 0.1s ease}}"
+            f"#entity-panel-{uid} .ep-schema.collapsed .ep-schema-caret{{"
+            f"transform:rotate(-90deg)}}"
             f"</style>"
         )
         parts.append(f'<div id="entity-panel-{uid}" class="entity-panel">')
@@ -2272,7 +2544,7 @@ class SQLRunnerCM:
         parts.append(
             '<div class="ep-search-wrap">'
             '<input type="search" class="ep-search" '
-            'placeholder="🔎 검색 (테이블/컬럼)..." '
+            'placeholder="🔎 검색 (스키마/테이블/컬럼)..." '
             'autocomplete="off" spellcheck="false"></div>'
         )
         if not self.tables:
@@ -2283,36 +2555,69 @@ class SQLRunnerCM:
                 '로 추가하세요.</div>'
             )
         else:
-            for tname, cols in self.tables.items():
-                tname_q = quote(tname, safe="")
-                note = self.notes.get(tname, "") or ""
-                parts.append(
-                    f'<div class="ep-tbl" '
-                    f'data-tname="{escape(tname.lower())}">'
-                )
-                parts.append(
-                    f'<button type="button" class="ep-btn ep-tbl-btn" '
-                    f'data-snippet="{tname_q}" '
-                    f'title="{escape(note)}">'
-                    f'📋 {escape(tname)}  ({len(cols)})</button>'
-                )
-                if note:
+            multi = len(self.tables) > 1
+            name_counts = self._table_name_counts()
+            for sch in sorted(self.tables.keys()):
+                sch_tables = self.tables[sch]
+                # 다중 schema 일 때만 schema 그룹 헤더 노출 — 단일 schema 는
+                # 기존 005 와 동일한 flat 모양 유지 (시각적 부담 0).
+                if multi:
                     parts.append(
-                        f'<div class="ep-note">{escape(note)}</div>'
+                        f'<div class="ep-schema" '
+                        f'data-schema="{escape(sch.lower())}">'
                     )
-                parts.append('<div class="ep-cols">')
-                for c in cols:
-                    cname = c["name"]
-                    cname_q = quote(cname, safe="")
-                    doc = c.get("doc", "") or ""
+                    # IDE 관습대로 헤더 클릭은 그룹 접기/펼치기 (DataGrip/DBeaver
+                    # 패턴). 에디터에 `schema.` 인서트는 자동완성 popup
+                    # (schema 후보 클릭) 으로 충분.
                     parts.append(
-                        f'<button type="button" class="ep-btn ep-col-btn" '
-                        f'data-snippet="{cname_q}" '
-                        f'data-cname="{escape(cname.lower())}" '
-                        f'title="{escape(doc)}">{escape(cname)}</button>'
+                        f'<button type="button" '
+                        f'class="ep-schema-hdr" '
+                        f'title="클릭하여 그룹 접기/펼치기">'
+                        f'<span class="ep-schema-caret">▼</span> '
+                        f'📁 {escape(sch)}  ({len(sch_tables)})'
+                        f'</button>'
                     )
-                parts.append('</div>')   # ep-cols
-                parts.append('</div>')   # ep-tbl
+                for tname in sorted(sch_tables.keys()):
+                    cols = sch_tables[tname]
+                    # 동명 테이블이 여러 schema 에 있으면 인서트도 schema.table 로
+                    if multi and name_counts.get(tname, 0) > 1:
+                        snippet = f"{sch}.{tname}"
+                    else:
+                        snippet = tname
+                    snippet_q = quote(snippet, safe="")
+                    note = self.notes.get((sch, tname), "") or ""
+                    # 검색 매칭 키: bare table_name + schema.table_name 둘 다
+                    tname_search = f"{tname.lower()} {sch.lower()}.{tname.lower()}"
+                    parts.append(
+                        f'<div class="ep-tbl" '
+                        f'data-tname="{escape(tname_search)}">'
+                    )
+                    parts.append(
+                        f'<button type="button" class="ep-btn ep-tbl-btn" '
+                        f'data-snippet="{snippet_q}" '
+                        f'title="{escape(note or snippet)}">'
+                        f'📋 {escape(tname)}  ({len(cols)})</button>'
+                    )
+                    if note:
+                        parts.append(
+                            f'<div class="ep-note">{escape(note)}</div>'
+                        )
+                    parts.append('<div class="ep-cols">')
+                    for c in cols:
+                        cname = c["name"]
+                        cname_q = quote(cname, safe="")
+                        doc = c.get("doc", "") or ""
+                        parts.append(
+                            f'<button type="button" '
+                            f'class="ep-btn ep-col-btn" '
+                            f'data-snippet="{cname_q}" '
+                            f'data-cname="{escape(cname.lower())}" '
+                            f'title="{escape(doc)}">{escape(cname)}</button>'
+                        )
+                    parts.append('</div>')   # ep-cols
+                    parts.append('</div>')   # ep-tbl
+                if multi:
+                    parts.append('</div>')   # ep-schema
             # 검색 결과 0개일 때 안내 메시지 (JS 에서 toggle)
             parts.append(
                 '<div class="ep-no-match">검색 결과가 없습니다.</div>'
@@ -2337,7 +2642,15 @@ class SQLRunnerCM:
             "if(!panel)return false;"
             "if(panel.dataset.wired==='1')return true;"
             "panel.dataset.wired='1';"
+            # 1) schema 헤더 클릭 → 그룹 접기/펼치기 (인서트 없음)
             "panel.addEventListener('click',function(e){"
+            "var hdr=e.target.closest&&e.target.closest('.ep-schema-hdr');"
+            "if(hdr&&panel.contains(hdr)){"
+            "var grp=hdr.closest('.ep-schema');"
+            "if(grp)grp.classList.toggle('collapsed');"
+            "return;"
+            "}"
+            # 2) 테이블/컬럼 버튼 클릭 → 에디터 인서트
             "var btn=e.target.closest&&e.target.closest('.ep-btn');"
             "if(!btn||!panel.contains(btn))return;"
             "var raw=btn.dataset.snippet||'';"
@@ -2346,27 +2659,32 @@ class SQLRunnerCM:
             "var fn=window['__cmInsert_'+UID];"
             "if(fn)fn(snippet);"
             "});"
+            # 3) 검색 — schema 그룹 + 테이블 + 컬럼 셋 다 매칭
             "var search=panel.querySelector('.ep-search');"
             "var noMatch=panel.querySelector('.ep-no-match');"
             "if(search){"
             "search.addEventListener('input',function(){"
             "var q=(search.value||'').toLowerCase().trim();"
-            "var tbls=panel.querySelectorAll('.ep-tbl');"
+            "var schemas=panel.querySelectorAll('.ep-schema');"
             "var anyVisible=false;"
+            # schema 그룹별 처리 (단일 schema 일 때는 schemas.length=0 → tables 만 직접 처리)
+            "function filterTables(scope,schemaMatched){"
+            "var tbls=scope.querySelectorAll('.ep-tbl');"
+            "var grpHasVisible=false;"
             "for(var i=0;i<tbls.length;i++){"
             "var tbl=tbls[i];"
             "var cbs=tbl.querySelectorAll('.ep-col-btn');"
-            "if(!q){"
+            "if(!q||schemaMatched){"
             "tbl.style.display='';"
             "for(var j=0;j<cbs.length;j++)cbs[j].style.display='';"
-            "anyVisible=true;"
+            "grpHasVisible=true;"
             "continue;"
             "}"
             "var tname=tbl.dataset.tname||'';"
             "if(tname.indexOf(q)>=0){"
             "tbl.style.display='';"
             "for(var j=0;j<cbs.length;j++)cbs[j].style.display='';"
-            "anyVisible=true;"
+            "grpHasVisible=true;"
             "}else{"
             "var any=false;"
             "for(var j=0;j<cbs.length;j++){"
@@ -2375,8 +2693,29 @@ class SQLRunnerCM:
             "else{cbs[j].style.display='none';}"
             "}"
             "tbl.style.display=any?'':'none';"
-            "if(any)anyVisible=true;"
+            "if(any)grpHasVisible=true;"
             "}"
+            "}"
+            "return grpHasVisible;"
+            "}"
+            "if(schemas.length>0){"
+            # multi-schema 모드
+            "for(var s=0;s<schemas.length;s++){"
+            "var grp=schemas[s];"
+            "var sname=grp.dataset.schema||'';"
+            "var schemaMatched=q&&sname.indexOf(q)>=0;"
+            "var grpVisible=filterTables(grp,schemaMatched);"
+            "if(!q||schemaMatched||grpVisible){"
+            "grp.style.display='';"
+            "if(q&&schemaMatched)grp.classList.remove('collapsed');"
+            "anyVisible=true;"
+            "}else{"
+            "grp.style.display='none';"
+            "}"
+            "}"
+            "}else{"
+            # 단일 schema flat 모드
+            "anyVisible=filterTables(panel,false)||!q;"
             "}"
             "if(noMatch)noMatch.style.display=(q&&!anyVisible)?'block':'none';"
             "});"
@@ -2497,6 +2836,7 @@ class SQLRunnerCM:
             ))
         else:
             kind_color = {
+                "schema": "#0369a1",
                 "table": "#047857",
                 "column": "#b45309",
                 "keyword": "#2563eb",
