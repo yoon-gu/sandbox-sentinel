@@ -1519,6 +1519,20 @@ _BOOTSTRAP_JS_TPL = r"""
         hint: contextHint,
         completeSingle: false,
         closeOnUnfocus: true,
+        // popup 의 Tab 을 "닫고 들여쓰기" 로 덮어쓰기 — show-hint.js 의 기본
+        // 키맵은 Tab 을 후보 선택에 쓰지만, schema-first 흐름에서 자동
+        // popup 이 자주 떠 사용자가 들여쓰기를 기대한 Tab 이 schema 인서트
+        // 로 가로채지는 문제를 방지. Enter / Click 은 그대로 선택.
+        extraKeys: {{
+          Tab: function(cm, handle){{
+            handle.close();
+            if(cm.somethingSelected()){{ cm.indentSelection("add"); }}
+            else {{ cm.replaceSelection(
+              Array(cm.getOption("indentUnit")+1).join(" "),
+              "end", "+input"
+            ); }}
+          }}
+        }},
       }},
       extraKeys: {{
         "Ctrl-Space": "autocomplete",
