@@ -201,11 +201,27 @@ _JOIN_RE = re.compile(
 )
 
 
-def extract_aliases(text: str, tables: Mapping[str, list]) -> dict:
-    """``FROM <t> [AS] <alias>`` / ``JOIN <t> [AS] <alias>`` 스캔.
+def _iter_tables(tables: Mapping[str, Mapping[str, list]]):
+    """``{schema:{name:cols}}`` 를 (schema, name, cols) 로 평탄화 (sorted)."""
+    for sch in sorted(tables.keys()):
+        for tn in sorted(tables[sch].keys()):
+            yield sch, tn, tables[sch][tn]
+
+
+def extract_aliases(text: str,
+                    tables: Mapping[str, Mapping[str, list]]) -> dict:
+    """``FROM <t> [AS] <alias>`` / ``JOIN <t> [AS] <alias>`` 스캔 (다중 schema).
 
     지원: 콤마 join (`FROM x, y`), schema-qualified (`public.t AS o`),
-    본명 자체 매핑 (`orders → orders` / `o → orders`).
+    본명 자체 매핑 (`orders → (sch, orders)` / `o → (sch, orders)`).
+
+    Returns:
+        매핑 ``alias_or_name → (schema, table_name)``.
+        - 본명만 친 경우 (`orders`) 도 자기 자신에 매핑되어 'orders.' / 'o.'
+          모두 동작.
+        - 동명 테이블이 여러 schema 에 있을 때 schema 미지정이면 가장 먼저
+          발견된 schema 로 결정 (사용자는 모호함을 피하려면 ``schema.table``
+          로 명시 권장).
     """
     s = re.sub(r"--[^\n]*", " ", text)
     s = re.sub(r"/\*.*?\*/", " ", s, flags=re.DOTALL)
@@ -213,13 +229,29 @@ def extract_aliases(text: str, tables: Mapping[str, list]) -> dict:
     s = re.sub(r'"[^"]*"', " ", s)
     aliases: dict = {}
 
+    def _resolve(tname_full: str):
+        """``schema.table`` 또는 bare ``table`` 을 (schema, name) 으로 해소."""
+        if "." in tname_full:
+            sch, name = tname_full.split(".", 1)
+            if sch in tables and name in tables[sch]:
+                return sch, name
+            return None
+        for sch in tables:
+            if tname_full in tables[sch]:
+                return sch, tname_full
+        return None
+
     def _register(tname_full: str, alias: Optional[str]) -> None:
-        tname = tname_full.split(".")[-1]
-        if tname not in tables:
+        resolved = _resolve(tname_full)
+        if resolved is None:
             return
-        aliases[tname] = tname
+        sch, name = resolved
+        # 본명 / 명시이름 / alias 모두 (schema, name) 으로 매핑
+        aliases[name] = resolved
+        if "." in tname_full:
+            aliases[tname_full] = resolved
         if alias and alias.upper() not in _NOT_ALIAS:
-            aliases[alias] = tname
+            aliases[alias] = resolved
 
     for m in _FROM_RE.finditer(s):
         rest = s[m.end():]
@@ -238,59 +270,119 @@ def extract_aliases(text: str, tables: Mapping[str, list]) -> dict:
     return aliases
 
 
-def get_suggestions(text: str, tables: Mapping[str, list],
-                     full_text: Optional[str] = None) -> list:
-    """현재 컨텍스트에 맞는 추천 후보 리스트.
+def get_suggestions(text: str,
+                    tables: Mapping[str, Mapping[str, list]],
+                    full_text: Optional[str] = None) -> list:
+    """현재 컨텍스트에 맞는 추천 후보 리스트 (다중 schema).
 
     Args:
         text: cursor 까지의 텍스트 (컨텍스트 감지 + 마지막 부분 단어).
-        tables: 스키마 매핑.
+        tables: ``{schema: {table_name: columns}}`` 중첩 매핑.
         full_text: 전체 SQL. alias 추출에 사용. None 이면 ``text``.
-            SELECT 절(FROM 보다 앞)에서도 alias 가 잡히려면 전체 텍스트
-            전달 필요.
     """
     ctx = detect_context(text)
     m = re.search(r"([\w_.]+)$", text)
     last_word = m.group(1) if m else ""
     last_lower = last_word.lower()
 
-    # table_or_alias. qualifier 우선
+    # 동명 테이블이 여러 schema 에 있을 때 disambiguation 용 카운트
+    name_counts: dict[str, int] = {}
+    for sch_name in tables:
+        for tn in tables[sch_name]:
+            name_counts[tn] = name_counts.get(tn, 0) + 1
+
+    # ── qualifier (점 포함) 우선 처리 ──
+    # 1 dot:  ``alias.col`` / ``table.col`` / ``schema.table``
+    # 2 dot:  ``schema.table.col``
     if "." in last_word:
-        dot_idx = last_word.index(".")
-        qual = last_word[:dot_idx]
-        col_prefix = last_word[dot_idx + 1:].lower()
-        aliases = extract_aliases(
-            full_text if full_text is not None else text, tables
-        )
-        real = aliases.get(qual)
-        if real and real in tables:
+        parts = last_word.split(".")
+        # 2-dot: schema.table.col → 해당 schema/table 의 컬럼 추천
+        if len(parts) >= 3:
+            sch, tname, col_prefix = parts[0], parts[1], parts[2].lower()
+            if sch in tables and tname in tables[sch]:
+                return [
+                    {
+                        "value": f"{sch}.{tname}.{c['name']}",
+                        "label": (f"{c['name']} {_short_type(c.get('type',''))}"
+                                  if c.get("type") else c["name"]),
+                        "kind": "column",
+                        "meta": c.get("type", "") or f"{sch}.{tname}",
+                    }
+                    for c in tables[sch][tname]
+                    if c["name"].lower().startswith(col_prefix)
+                ][:30]
+        # 1-dot
+        qual, fp = parts[0], parts[1].lower()
+        # (a) qual 이 schema 면 해당 schema 의 테이블 후보
+        if qual in tables:
             return [
-                {"value": f"{qual}.{c['name']}",
-                 "label": (f"{c['name']} {_short_type(c.get('type',''))}"
-                           if c.get("type") else c["name"]),
-                 "kind": "column",
-                 "meta": c.get("type", "") or real}
-                for c in tables[real]
-                if c["name"].lower().startswith(col_prefix)
+                {
+                    "value": f"{qual}.{tn}",
+                    "label": tn,
+                    "kind": "table",
+                    "meta": qual,
+                }
+                for tn in sorted(tables[qual].keys())
+                if tn.lower().startswith(fp)
+            ][:30]
+        # (b) qual 이 alias 또는 table 명 → 컬럼 추천
+        aliases = extract_aliases(
+            full_text if full_text is not None else text, tables)
+        resolved = aliases.get(qual)
+        if resolved is not None:
+            sch, tname = resolved
+            return [
+                {
+                    "value": f"{qual}.{c['name']}",
+                    "label": (f"{c['name']} {_short_type(c.get('type',''))}"
+                              if c.get("type") else c["name"]),
+                    "kind": "column",
+                    "meta": c.get("type", "") or f"{sch}.{tname}",
+                }
+                for c in tables[sch][tname]
+                if c["name"].lower().startswith(fp)
             ][:30]
 
     cands: list = []
+    multi_schema = len(tables) > 1
+
     if ctx in ("tables", "general", "start"):
-        for tname in tables.keys():
-            cands.append({"value": tname, "label": tname,
-                          "kind": "table", "meta": "table"})
+        # 다중 schema 일 때만 schema 후보를 먼저 노출
+        if multi_schema:
+            for sch in sorted(tables.keys()):
+                cands.append({
+                    "value": f"{sch}.",
+                    "label": f"📁 {sch}",
+                    "kind": "schema",
+                    "meta": f"schema · {len(tables[sch])} tables",
+                })
+        # bare table 후보 — 동명 충돌 시 schema. prefix 로 disambiguate
+        for sch, tname, _cols in _iter_tables(tables):
+            if multi_schema and name_counts.get(tname, 0) > 1:
+                value = f"{sch}.{tname}"
+                label = value
+            else:
+                value = tname
+                label = tname
+            cands.append({"value": value, "label": label,
+                          "kind": "table",
+                          "meta": sch if multi_schema else "table"})
     if ctx in ("columns", "columns_or_star", "general", "start"):
         seen: set = set()
-        for tname, cols in tables.items():
+        for sch, tname, cols in _iter_tables(tables):
             for c in cols:
                 if c["name"] in seen:
                     continue
                 seen.add(c["name"])
                 type_str = c.get("type", "") or ""
-                # 005 와 동일 — 컬럼 라벨에 짧은 타입 이모지 부착
                 col_label = (f"{c['name']} {_short_type(type_str)}"
                               if type_str else c["name"])
-                meta = (type_str + " · " if type_str else "") + tname
+                # 동명 충돌이면 src 도 schema.table 로
+                if multi_schema and name_counts.get(tname, 0) > 1:
+                    src = f"{sch}.{tname}"
+                else:
+                    src = tname
+                meta = (type_str + " · " if type_str else "") + src
                 cands.append({"value": c["name"], "label": col_label,
                               "kind": "column", "meta": meta})
     if ctx == "columns_or_star":
@@ -895,21 +987,35 @@ def _build_app(*, on_execute, tables, notes, initial_query,
             yield Footer()
 
         def on_mount(self) -> None:
-            # entity 트리 채우기
+            # entity 트리 채우기 — 다중 schema 지원
             tree = self.query_one("#entities", Tree)
             tree.show_root = False
             tree.root.expand()
             if not self._tables:
                 tree.root.add_leaf("(테이블이 없습니다)")
             else:
-                for tname, cols in self._tables.items():
+                schemas = sorted(self._tables.keys())
+                multi = len(schemas) > 1
+                # 동명 충돌 카운트 (insert 시 schema. prefix 결정용)
+                counts: dict[str, int] = {}
+                for s in schemas:
+                    for tn in self._tables[s]:
+                        counts[tn] = counts.get(tn, 0) + 1
+
+                def _add_table_node(parent, sch, tname, cols):
                     label = f"📋 {tname}  ({len(cols)})"
-                    if self._notes.get(tname):
-                        label += f"  [dim]{self._notes[tname]}[/]"
-                    node = tree.root.add(Text.from_markup(label),
-                                         data={"kind": "table",
-                                               "name": tname},
-                                         expand=True)
+                    note = self._notes.get((sch, tname), "")
+                    if note:
+                        label += f"  [dim]{note}[/]"
+                    # 동명 충돌 시 인서트는 schema.table 로 자동 disambiguate
+                    insert_name = (f"{sch}.{tname}"
+                                   if (multi and counts.get(tname, 0) > 1)
+                                   else tname)
+                    node = parent.add(
+                        Text.from_markup(label),
+                        data={"kind": "table", "name": insert_name},
+                        expand=not multi,  # 단일 schema 면 펼침, 다중이면 접힘
+                    )
                     for c in cols:
                         meta = c.get("type", "")
                         doc = c.get("doc", "")
@@ -921,8 +1027,29 @@ def _build_app(*, on_execute, tables, notes, initial_query,
                             Text.from_markup(leaf_label),
                             data={"kind": "column",
                                   "name": c["name"], "table": tname,
+                                  "schema": sch,
                                   "type": meta, "doc": doc},
                         )
+
+                if multi:
+                    # 각 schema 를 폴더로
+                    for sch in schemas:
+                        sch_label = (f"📁 [bold cyan]{sch}[/]  "
+                                     f"({len(self._tables[sch])})")
+                        sch_node = tree.root.add(
+                            Text.from_markup(sch_label),
+                            data={"kind": "schema", "name": sch},
+                            expand=True,
+                        )
+                        for tname in sorted(self._tables[sch].keys()):
+                            _add_table_node(sch_node, sch, tname,
+                                            self._tables[sch][tname])
+                else:
+                    # 단일 schema → flat (헤더 숨김)
+                    sch = schemas[0]
+                    for tname in sorted(self._tables[sch].keys()):
+                        _add_table_node(tree.root, sch, tname,
+                                        self._tables[sch][tname])
 
             # 결과 테이블 초기 컬럼
             table = self.query_one("#results", DataTable)
@@ -1073,10 +1200,13 @@ def _build_app(*, on_execute, tables, notes, initial_query,
             self._hide_popup()
 
         # ── 트리 노드 선택 → 에디터 커서 위치에 이름 인서트 ──
-        # 테이블 / 컬럼 구분 없이 이름만 단순 인서트.
+        # 테이블 / 컬럼 구분 없이 이름만 인서트. schema 폴더는 그룹용이라
+        # 인서트하지 않음 (Enter 누르면 자식 토글만).
         def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
             data = event.node.data
             if not data:
+                return
+            if data.get("kind") == "schema":
                 return
             self._insert_at_cursor(data["name"])
 
@@ -1326,8 +1456,12 @@ class SQLRunnerTUI:
     def __init__(self,
                  on_execute: Optional[Callable[[str], Any]] = None,
                  on_chat: Optional[Callable[[str], str]] = None) -> None:
-        self.tables: dict[str, list[dict]] = {}
-        self.notes: dict[str, str] = {}
+        # 다중 schema 지원: schema → table_name → columns
+        # 단일 schema 사용 시 자연스럽게 "main" 한 그룹만 사용됨.
+        self.tables: dict[str, dict[str, list[dict]]] = {}
+        # note 는 (schema, table) 복합 키로 — 동명 테이블 충돌 회피
+        self.notes: dict[tuple[str, str], str] = {}
+        self.default_schema: str = "main"
         self.initial_query: str = ""
         self.on_execute = on_execute
         self.on_chat = on_chat
@@ -1382,21 +1516,39 @@ class SQLRunnerTUI:
         runner.from_sqlite(db_path)
         return runner
 
+    # ----- 스키마 등록 (다중 schema 지원) -----
+    #
+    # 모든 등록 함수가 ``schema=`` 인자를 받음 (기본값 ``"main"`` — SQLite
+    # 관례). 단일 schema 만 쓰면 트리에 schema 헤더가 숨고 기존과 동일한
+    # 모양. 두 개 이상 등록되면 트리가 schema 별로 그룹핑되고 자동완성도
+    # schema-first 로 동작.
+
     def add_table(self, name: str,
                   columns: Iterable[ColumnSpec],
-                  description: str = "") -> "SQLRunnerTUI":
-        self.tables[name] = [_normalize_column(c) for c in columns]
+                  description: str = "",
+                  schema: Optional[str] = None) -> "SQLRunnerTUI":
+        sch = schema or self.default_schema
+        bucket = self.tables.setdefault(sch, {})
+        bucket[name] = [_normalize_column(c) for c in columns]
         if description:
-            self.notes[name] = description
+            self.notes[(sch, name)] = description
         return self
 
     def from_dict(self,
-                  schema: Mapping[str, Iterable[ColumnSpec]]) -> "SQLRunnerTUI":
-        for tname, cols in schema.items():
-            self.add_table(tname, cols)
+                  tables: Mapping[str, Iterable[ColumnSpec]],
+                  schema: Optional[str] = None) -> "SQLRunnerTUI":
+        """``{table_name: columns, ...}`` dict 를 한 schema 에 일괄 등록."""
+        for tname, cols in tables.items():
+            self.add_table(tname, cols, schema=schema)
         return self
 
-    def from_sqlite(self, path: str) -> "SQLRunnerTUI":
+    def from_sqlite(self, path: str,
+                    schema: Optional[str] = None) -> "SQLRunnerTUI":
+        """SQLite DB 파일에서 테이블/컬럼 자동 등록.
+
+        다중 schema 가 필요하면 두 번 호출하여 다른 ``schema=`` 로 등록.
+        """
+        sch = schema or self.default_schema
         conn = sqlite3.connect(path)
         try:
             cur = conn.cursor()
@@ -1406,6 +1558,7 @@ class SQLRunnerTUI:
                 "ORDER BY name"
             )
             tnames = [row[0] for row in cur.fetchall()]
+            bucket = self.tables.setdefault(sch, {})
             for t in tnames:
                 cur.execute(f"PRAGMA table_info({t})")
                 cols: list[ColumnSpec] = []
@@ -1413,13 +1566,17 @@ class SQLRunnerTUI:
                     cols.append({"name": cname,
                                  "type": ctype or "",
                                  "doc": "PK" if pk else ""})
-                self.tables[t] = [_normalize_column(c) for c in cols]
+                bucket[t] = [_normalize_column(c) for c in cols]
         finally:
             conn.close()
         return self
 
     def from_dataframes(self,
-                        dataframes: Mapping[str, Any]) -> "SQLRunnerTUI":
+                        dataframes: Mapping[str, Any],
+                        schema: Optional[str] = None) -> "SQLRunnerTUI":
+        """``{table_name: DataFrame, ...}`` dict 를 한 schema 에 등록."""
+        sch = schema or self.default_schema
+        bucket = self.tables.setdefault(sch, {})
         for name, df in dataframes.items():
             cols: list[ColumnSpec] = []
             try:
@@ -1430,8 +1587,24 @@ class SQLRunnerTUI:
                 raise TypeError(
                     f"from_dataframes 의 값은 pandas.DataFrame 이어야 합니다 ({name})"
                 ) from e
-            self.tables[name] = [_normalize_column(c) for c in cols]
+            bucket[name] = [_normalize_column(c) for c in cols]
         return self
+
+    # ----- 다중 schema 헬퍼 (UI · 자동완성에서 공용) -----
+
+    def _iter_all_tables(self) -> Iterable[tuple]:
+        """모든 (schema, table_name, columns) 를 schema → name 순으로 yield."""
+        for sch in sorted(self.tables.keys()):
+            for tname in sorted(self.tables[sch].keys()):
+                yield sch, tname, self.tables[sch][tname]
+
+    def _table_name_counts(self) -> dict:
+        """동명 테이블이 몇 개 schema 에 분포하는지 — disambiguation 용."""
+        counts: dict[str, int] = {}
+        for sch in self.tables:
+            for tname in self.tables[sch]:
+                counts[tname] = counts.get(tname, 0) + 1
+        return counts
 
     def set_query(self, query: str) -> "SQLRunnerTUI":
         self.initial_query = query
@@ -1460,15 +1633,32 @@ if __name__ == "__main__":
     import sys, os, tempfile
 
     if "--check" in sys.argv:
-        # CLI 단위 검증 (textual 앱 띄우지 않음)
+        # CLI 단위 검증 (textual 앱 띄우지 않음) — 단일/다중 schema 모두
         runner = SQLRunnerTUI()
         runner.add_table("users", ["id", "name", "email"], "사용자")
         runner.add_table("orders", [("id","INT"),("user_id","INT")])
-        print(f"등록된 테이블: {list(runner.tables.keys())}")
+        # 다중 schema 시연 — staging 에 동명 users 추가
+        runner.add_table("users", ["id", "name"], schema="staging")
+        runner.add_table("events", ["id", "type"], schema="analytics")
+        print(f"등록된 schema: {list(runner.tables.keys())}")
+        for sch, tn, _ in runner._iter_all_tables():
+            print(f"  {sch}.{tn}")
         ctx = detect_context("SELECT name FROM users WHERE ")
         sugs = get_suggestions("SELECT name FROM users WHERE ", runner.tables)
-        print(f"detect_context: {ctx}")
+        print(f"\ndetect_context: {ctx}")
         print(f"top suggestions: {[s['label'] for s in sugs[:8]]}")
+        # FROM 후 schema-first 노출 확인
+        sugs2 = get_suggestions("SELECT * FROM ", runner.tables)
+        print(f"\nFROM 후 추천 (schema-first):")
+        for s in sugs2[:6]:
+            print(f"  {s['label']:25s} kind={s['kind']:8s} value={s['value']}")
+        # qualifier: staging.<...>
+        sugs3 = get_suggestions("SELECT * FROM staging.", runner.tables)
+        print(f"\n'staging.' 후: {[s['label'] for s in sugs3]}")
+        # alias 추출 — FROM staging.users u → u → (staging, users)
+        aliases = extract_aliases("SELECT u.id FROM staging.users u",
+                                  runner.tables)
+        print(f"\nalias 추출: {aliases}")
         sys.exit(0)
 
     # 데모 DB 생성
