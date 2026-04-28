@@ -206,6 +206,28 @@ runner.add_table("orders", [
 runner.show()
 ```
 
+### 다중 schema (선택)
+
+같은 이름의 테이블이 여러 환경(예: `public.users`, `staging.users`) 에 공존하는 경우, `schema=` 인자로 분리 등록할 수 있습니다. **단일 schema 만 쓰면 사이드바는 기존과 동일한 flat 모양** 으로 그대로 보입니다 — schema 헤더는 schema 가 둘 이상일 때만 자동으로 등장합니다.
+
+```python
+runner = SQLRunnerCM(on_execute=my_executor)
+# 기본 schema ("main")
+runner.add_table("users",  ["id", "name", "email"])
+runner.add_table("orders", ["id", "user_id", "amount"])
+# 별도 schema 추가 — schema= 인자
+runner.add_table("users",  ["id", "name", "tier"], schema="staging")
+runner.from_dict({"events": ["id", "user_id", "ts"]}, schema="analytics")
+# from_sqlite / from_dataframes 도 동일하게 schema= 인자 수용
+runner.show()
+```
+
+사이드바와 자동완성에서:
+
+- **사이드바**: `📁 main`, `📁 staging`, `📁 analytics` 그룹으로 묶여 표시 (헤더 클릭으로 접기/펼치기). 동명 테이블이 여러 schema 에 있으면 클릭 시 자동으로 `staging.users` 형태로 인서트.
+- **자동완성 popup (FROM/JOIN 컨텍스트)**: 첫 줄에 schema 후보 (📁 main, 📁 staging, 📁 analytics) 가 먼저 뜨고, schema 를 선택하면 `main.` 인서트 후 popup 이 자동으로 다시 떠 그 schema 의 테이블만 보여줍니다 (2-step 흐름).
+- **컬럼 qualifier**: 기존 `alias.column` / `table.column` 외에도 `schema.table.column` 3-segment 입력에 컬럼 자동완성이 동작.
+
 ### 단축키 정리
 
 | 키 | 동작 |
