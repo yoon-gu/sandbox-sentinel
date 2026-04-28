@@ -1788,7 +1788,11 @@ _BOOTSTRAP_JS_TPL = r"""
   // hint(cm, data, completion) 을 주면 default 인서트를 대체 가능.
   function makeSchemaPicker(sch){{
     return function(cm, data, completion){{
-      cm.replaceRange(sch + ".", completion.from, completion.to);
+      // completion.from/to 는 후보 객체에 안 실려 있어 undefined →
+      // show-hint default 처럼 data.from/to 로 fallback 필수.
+      var from = completion.from || data.from;
+      var to   = completion.to   || data.to;
+      cm.replaceRange(sch + ".", from, to);
       // 인서트가 끝난 다음 tick 에 다시 popup — completionActive 검사로 중복 방지
       setTimeout(function(){{
         if(cm.state && cm.state.completionActive) return;
