@@ -42,7 +42,7 @@ SQL Runner TUI — Textual 기반 single-file SQL 편집기 + 실행 위젯.
 키 바인딩
 --------
     Ctrl+R / F5     ▶ 실행
-    Ctrl+N          자동완성 popup (커서 근처)
+    Ctrl+Space / Ctrl+N / F2  자동완성 popup (커서 근처) — 환경별 fallback
     Ctrl+K          💬 채팅 popup (🚧 미완성 — LLM 연동 hook 만 제공)
     Ctrl+/          현재 줄 / 선택 범위 SQL 주석 (--) 토글
     Ctrl+E / Cmd+→  줄 끝으로 커서 이동 (에디터 내)
@@ -494,12 +494,16 @@ def _build_app(*, on_execute, tables, notes, initial_query,
     from rich.text import Text
 
     # ── TextArea 는 그대로 (Tab 은 indent 기본 동작) ──
-    # Ctrl+N popup trigger / Shift+Tab dedent / Ctrl+/ 주석.
-    # Ctrl+E / Ctrl+A 는 macOS 의 Cmd+→ / Cmd+← 가 터미널에서 보내는 바이트
-    # (0x05 / 0x01) 와 동일 — 줄 끝/시작 이동에 매핑해 자연스러운 nav UX 제공.
+    # 자동완성 popup trigger 는 환경별로 안 먹는 키 차이가 있어 셋 다 묶음:
+    #   · Ctrl+Space — 데스크톱 터미널 (iTerm2, Alacritty 등). xterm.js/JupyterLab
+    #     웹 터미널에서는 NUL 바이트로 필터링되어 안 잡힘.
+    #   · Ctrl+N — xterm.js/JupyterLab 에서 동작. 단 Windows 브라우저의
+    #     "새 창" 단축키와 충돌.
+    #   · F2 — 모든 환경 호환 (브라우저도 가로채지 않음).
+    # Shift+Tab dedent / Ctrl+/ 주석. Ctrl+E / Ctrl+A 는 macOS Cmd+→/← 호환.
     class _SqlTextArea(TextArea):
         BINDINGS = [
-            Binding("ctrl+n", "trigger_popup",
+            Binding("ctrl+space,ctrl+n,f2", "trigger_popup",
                     description="자동완성", show=False, priority=True),
             Binding("shift+tab", "dedent",
                     description="들여쓰기 해제", show=False, priority=True),
@@ -589,7 +593,7 @@ def _build_app(*, on_execute, tables, notes, initial_query,
                     )
 
     # ── 커서 근처에 떠 있는 floating 자동완성 popup ──
-    # 에디터 입력에 따라 자동 표시. Ctrl+N 으로도 수동 호출.
+    # 에디터 입력에 따라 자동 표시. Ctrl+Space / Ctrl+N / F2 로 수동 호출.
     # Tab/Enter 로 선택 · Esc/Tab 으로 닫기. 글자 입력 시 에디터로 forwarding.
     class _CursorPopup(OptionList):
         DEFAULT_CSS = """
@@ -867,11 +871,14 @@ def _build_app(*, on_execute, tables, notes, initial_query,
                     "  [yellow]Tab[/]              들여쓰기 (4 spaces)\n"
                     "  [yellow]Shift+Tab[/]        들여쓰기 해제 (dedent)\n"
                     "  [yellow]Ctrl+/[/]           현재 줄 / 선택 범위 주석 (`--`) 토글\n"
-                    "  [yellow]Ctrl+N[/]           자동완성 popup (커서 근처)\n"
+                    "  [yellow]Ctrl+Space / Ctrl+N / F2[/]  자동완성 popup\n"
+                    "    [dim]· Ctrl+Space → 데스크톱 터미널 (iTerm2 등)\n"
+                    "    · Ctrl+N → JupyterLab xterm.js\n"
+                    "    · F2 → Windows 브라우저 안전 fallback[/]\n"
                     "  [yellow]Ctrl+E[/] / [yellow]Cmd+→[/]    줄 끝으로 커서 이동\n"
                     "  [yellow]Ctrl+A[/] / [yellow]Cmd+←[/]    줄 시작으로 커서 이동\n"
                     "  [yellow]Ctrl+R / F5[/]      ▶ 실행\n\n"
-                    "[b]자동완성 popup (Ctrl+N)[/]\n\n"
+                    "[b]자동완성 popup[/]\n\n"
                     "  • 커서 한 줄 아래에 floating 으로 등장\n"
                     "  • [yellow]↑↓[/]    후보 이동\n"
                     "  • [yellow]Tab/Enter[/]  선택 → 인서트 + 닫힘\n"
@@ -927,7 +934,9 @@ def _build_app(*, on_execute, tables, notes, initial_query,
             # Cmd+→ 와 충돌해 줄 끝 이동에 양보 (에디터 BINDINGS 에서 처리).
             Binding("ctrl+r,f5",  "run",
                     "▶ 실행", priority=True),
-            Binding("ctrl+n",     "show_popup",   "자동완성", priority=True),
+            # ctrl+space (데스크톱 터미널) / ctrl+n (xterm.js) / f2 (Windows 안전)
+            Binding("ctrl+space,ctrl+n,f2", "show_popup",
+                    "자동완성", priority=True),
             Binding("ctrl+k",     "open_chat",    "💬 채팅(🚧)",  priority=True),
             Binding("ctrl+t",     "focus_tree",   "트리"),
             Binding("ctrl+b",     "focus_editor", "에디터"),
@@ -1096,7 +1105,7 @@ def _build_app(*, on_execute, tables, notes, initial_query,
                 before_cursor = full
             self._update_suggest(before_cursor, full_text=full)
 
-            # popup 자동 트리거 안 함 (Ctrl+N 만으로 호출).
+            # popup 자동 트리거 안 함 (Ctrl+Space/Ctrl+N/F2 로 수동 호출).
             # 단, 이미 popup 이 떠 있는 동안엔 글자/커서 변경에 따라
             # 콘텐츠와 위치를 즉시 갱신해 IDE 같은 filter-as-you-type 체감.
             popup = self.query_one("#popup", _CursorPopup)
@@ -1119,7 +1128,7 @@ def _build_app(*, on_execute, tables, notes, initial_query,
                 text, self._tables, full_text=full_text)[:30]
 
             # 005 처럼 컨텍스트 라벨 아래에 컬러 칩으로 가능한 항목 노출
-            # (정보용 — 클릭/포커스 X, Ctrl+N 누르면 진짜 popup 뜸)
+            # (정보용 — 클릭/포커스 X, Ctrl+Space/Ctrl+N/F2 누르면 진짜 popup 뜸)
             kind_color = {
                 "table": "green", "column": "yellow",
                 "keyword": "cyan", "function": "magenta", "star": "white",
@@ -1132,7 +1141,7 @@ def _build_app(*, on_execute, tables, notes, initial_query,
 
             self.query_one("#ctx-label", Static).update(Text.from_markup(
                 f"💡 [bold cyan]{ctx_label}[/]  "
-                f"[dim]· Ctrl+N 자동완성 · Ctrl+E 실행 · Ctrl+K 채팅 · "
+                f"[dim]· Ctrl+Space/N/F2 자동완성 · Ctrl+R/F5 실행 · Ctrl+K 채팅 · "
                 f"Tab 들여쓰기[/]\n   {chips_str}"
             ))
 
@@ -1182,7 +1191,7 @@ def _build_app(*, on_execute, tables, notes, initial_query,
                 pass
 
         def action_show_popup(self) -> None:
-            """수동 트리거 (Ctrl+N)."""
+            """수동 트리거 (Ctrl+Space / Ctrl+N / F2)."""
             self._refresh_suggest()
             if self._current_sugs:
                 self._show_popup()
@@ -1682,7 +1691,7 @@ if __name__ == "__main__":
 
     runner = SQLRunnerTUI.with_sqlite(db_path)
     runner.set_query(
-        "-- Ctrl+R 또는 F5 실행 · Ctrl+N 자동완성 · Ctrl+/ 주석 · F1 도움말\n"
+        "-- Ctrl+R/F5 실행 · Ctrl+Space|N|F2 자동완성 · Ctrl+/ 주석 · F1 도움말\n"
         "SELECT u.name, u.region, SUM(o.amount) AS total\n"
         "FROM users u JOIN orders o ON o.user_id = u.id\n"
         "WHERE o.status = 'paid'\n"

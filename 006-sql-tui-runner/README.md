@@ -9,7 +9,7 @@
 | 환경 | Jupyter 노트북 | **터미널** (ssh OK) |
 | 브라우저 / Trust 필요 | ✅ / **Trust 필수** | ❌ |
 | **에디터 자체** syntax 색 | ✅ CodeMirror | ✅ Textual native (tree-sitter SQL) |
-| inline 자동완성 | ✅ Ctrl+Space popup | ✅ 인라인 OptionList (Tab) + Ctrl+N 커서 popup |
+| inline 자동완성 | ✅ Ctrl+Space popup | ✅ 인라인 OptionList (Tab) + Ctrl+Space/N/F2 커서 popup |
 | 컨텍스트 추천 패널 | ✅ | ✅ |
 | 커서 위치 정밀 인서트 | ✅ | ✅ |
 | ▶ 실행 → Python 콜백 | ✅ Cmd/Ctrl+Enter | ✅ Ctrl+R / F5 |
@@ -57,7 +57,7 @@
 | **Ctrl+R / F5** | ▶ 실행 (현재 SQL 을 `on_execute` 에 전달) |
 | **Ctrl+E** / **Cmd+→** | 줄 끝으로 커서 이동 |
 | **Ctrl+A** / **Cmd+←** | 줄 시작으로 커서 이동 |
-| **Ctrl+N** | 자동완성 popup (커서 근처 floating) |
+| **Ctrl+Space / Ctrl+N / F2** | 자동완성 popup (커서 근처 floating). 환경별로 안 먹는 키가 달라 셋 다 묶어둠 — Ctrl+Space=데스크톱 터미널 / Ctrl+N=JupyterLab xterm.js / F2=Windows 브라우저 안전 |
 | **Ctrl+K** | 💬 채팅 popup (🚧 **미완성** — LLM 연동 hook 만 제공) |
 | **Ctrl+T** | 트리 포커스 |
 | **Ctrl+B** | 에디터 포커스 (Back to editor) |
