@@ -1777,18 +1777,16 @@ _BOOTSTRAP_JS_TPL = r"""
     return CTX_MAP[last] || "general";
   }}
 
-  // schema 후보 클릭 후 popup 자동 재호출 — `public.` 인서트 직후 그
-  // schema 의 테이블 후보가 즉시 뜨도록. CodeMirror 5 의 hint 객체에
-  // hint(cm, data, completion) 을 주면 default 인서트를 대체 가능.
-  function makeSchemaPicker(sch){{
-    return function(cm, data, completion){{
-      cm.replaceRange(sch + ".", completion.from, completion.to);
-      // 인서트가 끝난 다음 tick 에 다시 popup — completionActive 검사로 중복 방지
-      setTimeout(function(){{
-        if(cm.state && cm.state.completionActive) return;
-        cm.showHint({{ hint: contextHint, completeSingle: false }});
-      }}, 0);
-    }};
+  // schema 후보의 default 인서트(replaceRange) 가 동작한 직후 popup 을
+  // 다시 띄워 그 schema 의 테이블 후보를 보여주는 헬퍼. completion 객체에
+  // `hint` 함수를 주는 방식은 키보드 Tab/Enter 와 충돌 보고가 있어, 대신
+  // CodeMirror 의 'pick' 이벤트를 hook 한다 — default 인서트를 그대로
+  // 두므로 Enter/Tab/마우스 클릭 모두에서 일관되게 동작.
+  function rePopupAfter(cm){{
+    setTimeout(function(){{
+      if(cm.state && cm.state.completionActive) return;
+      cm.showHint({{ hint: contextHint, completeSingle: false }});
+    }}, 0);
   }}
 
   function contextHint(cm){{
@@ -1862,14 +1860,14 @@ _BOOTSTRAP_JS_TPL = r"""
 
     if(ctx === "tables" || ctx === "general" || ctx === "start"){{
       // schema 후보를 항상 가장 위에 노출 — schema 갯수와 무관 (single source).
-      // schema 선택 시 hint() 콜백이 popup 을 자동 재호출해 그 schema 의
-      // 테이블 후보를 즉시 보여줌.
+      // 선택 시 default 인서트로 'main.' 가 들어가고, 결과 객체에 등록한
+      // 'pick' 리스너가 popup 을 재호출하여 그 schema 의 테이블 후보 노출.
       listSchemas().forEach(function(sch){{
         var n = tablesIn(sch).length;
         cands.push({{
           text: sch + ".",
           displayText: "📁 " + sch + "  · schema (" + n + ")",
-          hint: makeSchemaPicker(sch)
+          _isSchema: true   // pick 후 popup 재호출 마커
         }});
       }});
       // bare table 후보 — schema 후보 다음. 동명 충돌은 schema. prefix
@@ -1931,11 +1929,19 @@ _BOOTSTRAP_JS_TPL = r"""
         return c.text.toLowerCase().indexOf(fl) >= 0;
       }});
     }}
-    return {{
+    var result = {{
       list: cands.slice(0, 50),
       from: CodeMirror.Pos(cur.line, start),
       to:   CodeMirror.Pos(cur.line, end),
     }};
+    // schema 후보가 선택되면 (Tab/Enter/마우스 모두) popup 을 자동 재호출
+    // → 그 schema 의 테이블 후보가 즉시 노출. default 인서트는 그대로 동작.
+    CodeMirror.on(result, "pick", function(completion){{
+      if(completion && completion._isSchema){{
+        rePopupAfter(cm);
+      }}
+    }});
+    return result;
   }}
 }})();
 """
