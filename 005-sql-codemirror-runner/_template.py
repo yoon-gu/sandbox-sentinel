@@ -1060,6 +1060,11 @@ _BOOTSTRAP_JS_TPL = r"""
         hint: contextHint,
         completeSingle: false,
         closeOnUnfocus: true,
+        // Tab 은 show-hint.js 의 기본 키맵 (handle.pick) 그대로 — click 과
+        // 동등한 후보 선택. schema 후보를 Tab 으로 선택하면 default 인서트로
+        // 'staging.' 이 들어가고 contextHint 의 'pick' 이벤트 리스너가
+        // popup 을 자동 재오픈해 그 schema 의 테이블 후보를 보여줌.
+        // popup 이 닫혀 있을 땐 editor 의 extraKeys.Tab 으로 들여쓰기.
       }},
       extraKeys: {{
         "Ctrl-Space": "autocomplete",
