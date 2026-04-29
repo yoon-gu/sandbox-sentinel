@@ -2101,16 +2101,18 @@ class SQLRunnerCM:
             '<div class="ep-header">'
             '<span>📚 Entities</span>'
             '<span class="ep-header-actions">'
+            # schema 그룹 토글 — 1 개라도 펼쳐져 있으면 모두 접고, 아니면 모두 펼침
             '<button type="button" class="ep-action-btn" '
-            'data-action="expand-all" title="모든 schema 그룹 펼치기">⊞</button>'
+            'data-action="toggle-schemas" '
+            'title="📁 schema 그룹 모두 토글 — 클릭하면 모든 schema 의 '
+            '테이블 목록을 한 번에 숨기거나 보여줍니다 (헤더만 남기기 / '
+            '전체 펼치기 자동 결정).">📁</button>'
+            # 테이블 컬럼 토글 — 컬럼 영역만 토글 (테이블 행은 유지)
             '<button type="button" class="ep-action-btn" '
-            'data-action="collapse-all" title="모든 schema 그룹 접기">⊟</button>'
-            '<button type="button" class="ep-action-btn" '
-            'data-action="expand-cols" title="모든 테이블의 컬럼 펼치기">'
-            '📋⊞</button>'
-            '<button type="button" class="ep-action-btn" '
-            'data-action="collapse-cols" title="모든 테이블의 컬럼 접기">'
-            '📋⊟</button>'
+            'data-action="toggle-cols" '
+            'title="📋 테이블 컬럼 모두 토글 — 클릭하면 모든 테이블의 컬럼 '
+            '칩 영역만 한 번에 숨기거나 보여줍니다 (테이블 행은 그대로 유지).">'
+            '📋</button>'
             '</span>'
             '</div>'
         )
@@ -2224,21 +2226,34 @@ class SQLRunnerCM:
             "if(!panel)return false;"
             "if(panel.dataset.wired==='1')return true;"
             "panel.dataset.wired='1';"
-            # 1) 헤더 액션 버튼들 — schema 그룹 / 테이블 컬럼 모두 접기/펼치기
+            # 1) 헤더 액션 버튼 — schema 그룹 / 테이블 컬럼 토글 (모두 펼침 ↔ 모두 접힘)
+            #    토글 정책: 하나라도 펼쳐져 있으면 → 모두 접고,
+            #               모두 접혀 있으면 → 모두 펼치기.
+            #    이로써 4 개 버튼을 2 개 토글로 단순화하면서 기능 유지.
             "panel.addEventListener('click',function(e){"
             "var act=e.target.closest&&e.target.closest('.ep-action-btn');"
             "if(act&&panel.contains(act)){"
             "var action=act.dataset.action;"
-            "if(action==='collapse-all'||action==='expand-all'){"
+            "if(action==='toggle-schemas'){"
             "var schemas=panel.querySelectorAll('.ep-schema');"
+            # 펼쳐진 그룹이 하나라도 있으면 모두 접기
+            "var anyExpanded=false;"
             "for(var i=0;i<schemas.length;i++){"
-            "if(action==='collapse-all')schemas[i].classList.add('collapsed');"
+            "if(!schemas[i].classList.contains('collapsed')){anyExpanded=true;break;}"
+            "}"
+            "for(var i=0;i<schemas.length;i++){"
+            "if(anyExpanded)schemas[i].classList.add('collapsed');"
             "else schemas[i].classList.remove('collapsed');"
             "}"
-            "}else if(action==='collapse-cols'||action==='expand-cols'){"
+            "}else if(action==='toggle-cols'){"
             "var tbls=panel.querySelectorAll('.ep-tbl');"
+            # 컬럼이 펼쳐진 테이블이 하나라도 있으면 모두 접기
+            "var anyExpanded=false;"
             "for(var i=0;i<tbls.length;i++){"
-            "if(action==='collapse-cols')tbls[i].classList.add('cols-collapsed');"
+            "if(!tbls[i].classList.contains('cols-collapsed')){anyExpanded=true;break;}"
+            "}"
+            "for(var i=0;i<tbls.length;i++){"
+            "if(anyExpanded)tbls[i].classList.add('cols-collapsed');"
             "else tbls[i].classList.remove('cols-collapsed');"
             "}"
             "}"
