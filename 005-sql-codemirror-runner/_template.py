@@ -2019,9 +2019,21 @@ class SQLRunnerCM:
             f"#entity-panel-{uid} *::before,"
             f"#entity-panel-{uid} *::after{{box-sizing:border-box}}"
             f"#entity-panel-{uid} .ep-header{{"
-            f"padding:8px 10px;font-weight:600;font-size:12px;"
+            f"display:flex;align-items:center;justify-content:space-between;"
+            f"padding:6px 10px;font-weight:600;font-size:12px;"
             f"background:#eef0f3;border-bottom:1px solid #d8dde1;"
             f"position:sticky;top:0;z-index:1}}"
+            f"#entity-panel-{uid} .ep-header-actions{{"
+            f"display:flex;gap:3px}}"
+            f"#entity-panel-{uid} .ep-action-btn{{"
+            f"padding:1px 6px;background:#fff;border:1px solid #c8ccd0;"
+            f"border-radius:3px;cursor:pointer;font-size:11px;"
+            f"color:#1f2329;line-height:1.4;font-weight:400}}"
+            f"#entity-panel-{uid} .ep-action-btn:hover{{"
+            f"background:#dbe6f0;border-color:#0369a1}}"
+            f"#entity-panel-{uid} .ep-col-type{{"
+            f"display:inline-block;margin-right:3px;"
+            f"opacity:0.85;font-size:10px}}"
             f"#entity-panel-{uid} .ep-search-wrap{{"
             f"padding:6px 8px;background:#f7f8fa;"
             f"border-bottom:1px solid #e3e6e9;"
@@ -2076,7 +2088,17 @@ class SQLRunnerCM:
             f"</style>"
         )
         parts.append(f'<div id="entity-panel-{uid}" class="entity-panel">')
-        parts.append('<div class="ep-header">📚 Entities</div>')
+        parts.append(
+            '<div class="ep-header">'
+            '<span>📚 Entities</span>'
+            '<span class="ep-header-actions">'
+            '<button type="button" class="ep-action-btn" '
+            'data-action="expand-all" title="모든 schema 그룹 펼치기">⊞</button>'
+            '<button type="button" class="ep-action-btn" '
+            'data-action="collapse-all" title="모든 schema 그룹 접기">⊟</button>'
+            '</span>'
+            '</div>'
+        )
         parts.append(
             '<div class="ep-search-wrap">'
             '<input type="search" class="ep-search" '
@@ -2141,12 +2163,24 @@ class SQLRunnerCM:
                         cname = c["name"]
                         cname_q = quote(cname, safe="")
                         doc = c.get("doc", "") or ""
+                        ctype = c.get("type", "") or ""
+                        # type 이 있으면 짧은 이모지를 변수명 앞에 prefix
+                        # — popup 자동완성과 동일한 _short_type 매핑 사용
+                        type_emoji = _short_type(ctype) if ctype else ""
+                        emoji_html = (
+                            f'<span class="ep-col-type">{escape(type_emoji)}</span>'
+                            if type_emoji else ""
+                        )
+                        # tooltip 에 type + doc 둘 다 노출
+                        tip_parts = [p for p in (ctype, doc) if p]
+                        tip = " · ".join(tip_parts)
                         parts.append(
                             f'<button type="button" '
                             f'class="ep-btn ep-col-btn" '
                             f'data-snippet="{cname_q}" '
                             f'data-cname="{escape(cname.lower())}" '
-                            f'title="{escape(doc)}">{escape(cname)}</button>'
+                            f'title="{escape(tip)}">'
+                            f'{emoji_html}{escape(cname)}</button>'
                         )
                     parts.append('</div>')   # ep-cols
                     parts.append('</div>')   # ep-tbl
@@ -2175,15 +2209,26 @@ class SQLRunnerCM:
             "if(!panel)return false;"
             "if(panel.dataset.wired==='1')return true;"
             "panel.dataset.wired='1';"
-            # 1) schema 헤더 클릭 → 그룹 접기/펼치기 (인서트 없음)
+            # 1) 모든 그룹 접기/펼치기 액션 버튼
             "panel.addEventListener('click',function(e){"
+            "var act=e.target.closest&&e.target.closest('.ep-action-btn');"
+            "if(act&&panel.contains(act)){"
+            "var action=act.dataset.action;"
+            "var schemas=panel.querySelectorAll('.ep-schema');"
+            "for(var i=0;i<schemas.length;i++){"
+            "if(action==='collapse-all')schemas[i].classList.add('collapsed');"
+            "else if(action==='expand-all')schemas[i].classList.remove('collapsed');"
+            "}"
+            "return;"
+            "}"
+            # 2) schema 헤더 클릭 → 그룹 접기/펼치기 (인서트 없음)
             "var hdr=e.target.closest&&e.target.closest('.ep-schema-hdr');"
             "if(hdr&&panel.contains(hdr)){"
             "var grp=hdr.closest('.ep-schema');"
             "if(grp)grp.classList.toggle('collapsed');"
             "return;"
             "}"
-            # 2) 테이블/컬럼 버튼 클릭 → 에디터 인서트
+            # 3) 테이블/컬럼 버튼 클릭 → 에디터 인서트
             "var btn=e.target.closest&&e.target.closest('.ep-btn');"
             "if(!btn||!panel.contains(btn))return;"
             "var raw=btn.dataset.snippet||'';"
