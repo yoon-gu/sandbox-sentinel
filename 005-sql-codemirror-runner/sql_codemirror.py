@@ -783,28 +783,27 @@ def get_suggestions(text: str,
             ][:30]
 
     cands: list = []
-    multi_schema = len(tables) > 1
 
     if ctx in ("tables", "general", "start"):
-        # 다중 schema 일 때만 schema 후보를 먼저 노출 (단일 schema 는 부담 0)
-        if multi_schema:
-            for sch in sorted(tables.keys()):
-                cands.append({
-                    "value": f"{sch}.",   # 인서트 시 점까지 — 사용자는 이어서 테이블명 입력
-                    "label": f"📁 {sch}",
-                    "kind": "schema",
-                    "meta": f"schema · {len(tables[sch])} tables",
-                })
+        # schema 후보를 항상 먼저 노출 — schema 갯수와 무관하게 동일하게 동작.
+        # 선택 시 'main.' 형태로 인서트되어 그 schema 의 테이블만 다시 추천.
+        for sch in sorted(tables.keys()):
+            cands.append({
+                "value": f"{sch}.",   # 인서트 시 점까지 — 사용자는 이어서 테이블명 입력
+                "label": f"📁 {sch}",
+                "kind": "schema",
+                "meta": f"schema · {len(tables[sch])} tables",
+            })
         # bare table 후보 — 동명 충돌 시 schema. prefix 로 disambiguate
         for sch, tname, _cols in _iter_tables(tables):
-            if multi_schema and name_counts.get(tname, 0) > 1:
+            if name_counts.get(tname, 0) > 1:
                 value = f"{sch}.{tname}"
                 label = value
             else:
                 value = tname
                 label = tname
             cands.append({"value": value, "label": label,
-                          "kind": "table", "meta": sch if multi_schema else "table"})
+                          "kind": "table", "meta": sch})
     if ctx in ("columns", "columns_or_star", "general", "start"):
         seen: set = set()
         for sch, tname, cols in _iter_tables(tables):
@@ -816,7 +815,7 @@ def get_suggestions(text: str,
                 col_label = (f"{c['name']} {_short_type(type_str)}"
                               if type_str else c["name"])
                 # 동명 테이블이 여러 schema 에 있으면 meta 도 schema.table
-                if multi_schema and name_counts.get(tname, 0) > 1:
+                if name_counts.get(tname, 0) > 1:
                     src = f"{sch}.{tname}"
                 else:
                     src = tname
@@ -1607,7 +1606,6 @@ _BOOTSTRAP_JS_TPL = r"""
   // ── 다중 schema 헬퍼 ──
   // SCHEMA = {{ schemaName: {{ tableName: [cols] }} }}
   function listSchemas(){{ return Object.keys(SCHEMA).sort(); }}
-  function isMultiSchema(){{ return listSchemas().length > 1; }}
   function tablesIn(sch){{
     return SCHEMA[sch] ? Object.keys(SCHEMA[sch]).sort() : [];
   }}
@@ -1807,7 +1805,6 @@ _BOOTSTRAP_JS_TPL = r"""
     // cursor 위치까지 반영되어야 정확.
     var beforeAll = cm.getRange({{line:0,ch:0}}, cur);
     var ctx = detectContext(beforeAll);
-    var multi = isMultiSchema();
     var counts = nameCounts();
 
     // ── qualifier 처리 (점 포함 word) ──
@@ -1864,26 +1861,23 @@ _BOOTSTRAP_JS_TPL = r"""
     var seenCol = {{}};
 
     if(ctx === "tables" || ctx === "general" || ctx === "start"){{
-      // 다중 schema 일 때만 schema 후보를 가장 위에 노출 — schema-first 흐름.
+      // schema 후보를 항상 가장 위에 노출 — schema 갯수와 무관 (single source).
       // schema 선택 시 hint() 콜백이 popup 을 자동 재호출해 그 schema 의
       // 테이블 후보를 즉시 보여줌.
-      if(multi){{
-        listSchemas().forEach(function(sch){{
-          var n = tablesIn(sch).length;
-          cands.push({{
-            text: sch + ".",
-            displayText: "📁 " + sch + "  · schema (" + n + ")",
-            hint: makeSchemaPicker(sch)
-          }});
+      listSchemas().forEach(function(sch){{
+        var n = tablesIn(sch).length;
+        cands.push({{
+          text: sch + ".",
+          displayText: "📁 " + sch + "  · schema (" + n + ")",
+          hint: makeSchemaPicker(sch)
         }});
-      }}
+      }});
       // bare table 후보 — schema 후보 다음. 동명 충돌은 schema. prefix
       iterTables().forEach(function(t){{
-        var ambiguous = multi && counts[t.name] > 1;
+        var ambiguous = counts[t.name] > 1;
         var txt = ambiguous ? (t.schema + "." + t.name) : t.name;
-        var meta = multi ? t.schema : "table";
         cands.push({{ text: txt,
-                     displayText: txt + "  · " + meta }});
+                     displayText: txt + "  · " + t.schema }});
       }});
     }}
     if(ctx === "columns" || ctx === "columns_or_star" ||
@@ -1893,7 +1887,7 @@ _BOOTSTRAP_JS_TPL = r"""
           if(seenCol[c.name]) return;
           seenCol[c.name] = 1;
           // 동명 테이블이 여러 schema 에 있으면 표시도 schema.table 로
-          var src = (multi && counts[t.name] > 1)
+          var src = (counts[t.name] > 1)
             ? (t.schema + "." + t.name) : t.name;
           var disp = c.type
             ? (c.name + " " + shortType(c.type) + "  · " + src)
@@ -2555,32 +2549,30 @@ class SQLRunnerCM:
                 '로 추가하세요.</div>'
             )
         else:
-            multi = len(self.tables) > 1
             name_counts = self._table_name_counts()
+            # schema 갯수와 무관하게 항상 schema 그룹으로 렌더 — 단일 schema
+            # 도 다중과 동일하게 📁 schema (n) 헤더 + 테이블 목록 구조.
             for sch in sorted(self.tables.keys()):
                 sch_tables = self.tables[sch]
-                # 다중 schema 일 때만 schema 그룹 헤더 노출 — 단일 schema 는
-                # 기존 005 와 동일한 flat 모양 유지 (시각적 부담 0).
-                if multi:
-                    parts.append(
-                        f'<div class="ep-schema" '
-                        f'data-schema="{escape(sch.lower())}">'
-                    )
-                    # IDE 관습대로 헤더 클릭은 그룹 접기/펼치기 (DataGrip/DBeaver
-                    # 패턴). 에디터에 `schema.` 인서트는 자동완성 popup
-                    # (schema 후보 클릭) 으로 충분.
-                    parts.append(
-                        f'<button type="button" '
-                        f'class="ep-schema-hdr" '
-                        f'title="클릭하여 그룹 접기/펼치기">'
-                        f'<span class="ep-schema-caret">▼</span> '
-                        f'📁 {escape(sch)}  ({len(sch_tables)})'
-                        f'</button>'
-                    )
+                parts.append(
+                    f'<div class="ep-schema" '
+                    f'data-schema="{escape(sch.lower())}">'
+                )
+                # IDE 관습대로 헤더 클릭은 그룹 접기/펼치기 (DataGrip/DBeaver
+                # 패턴). 에디터에 `schema.` 인서트는 자동완성 popup
+                # (schema 후보 클릭) 으로 충분.
+                parts.append(
+                    f'<button type="button" '
+                    f'class="ep-schema-hdr" '
+                    f'title="클릭하여 그룹 접기/펼치기">'
+                    f'<span class="ep-schema-caret">▼</span> '
+                    f'📁 {escape(sch)}  ({len(sch_tables)})'
+                    f'</button>'
+                )
                 for tname in sorted(sch_tables.keys()):
                     cols = sch_tables[tname]
                     # 동명 테이블이 여러 schema 에 있으면 인서트도 schema.table 로
-                    if multi and name_counts.get(tname, 0) > 1:
+                    if name_counts.get(tname, 0) > 1:
                         snippet = f"{sch}.{tname}"
                     else:
                         snippet = tname
@@ -2616,8 +2608,7 @@ class SQLRunnerCM:
                         )
                     parts.append('</div>')   # ep-cols
                     parts.append('</div>')   # ep-tbl
-                if multi:
-                    parts.append('</div>')   # ep-schema
+                parts.append('</div>')   # ep-schema
             # 검색 결과 0개일 때 안내 메시지 (JS 에서 toggle)
             parts.append(
                 '<div class="ep-no-match">검색 결과가 없습니다.</div>'
@@ -2667,7 +2658,7 @@ class SQLRunnerCM:
             "var q=(search.value||'').toLowerCase().trim();"
             "var schemas=panel.querySelectorAll('.ep-schema');"
             "var anyVisible=false;"
-            # schema 그룹별 처리 (단일 schema 일 때는 schemas.length=0 → tables 만 직접 처리)
+            # 모든 schema 가 항상 그룹으로 렌더되므로 (schemas.length>=1) 단일/다중 분기 없음
             "function filterTables(scope,schemaMatched){"
             "var tbls=scope.querySelectorAll('.ep-tbl');"
             "var grpHasVisible=false;"
@@ -2698,8 +2689,6 @@ class SQLRunnerCM:
             "}"
             "return grpHasVisible;"
             "}"
-            "if(schemas.length>0){"
-            # multi-schema 모드
             "for(var s=0;s<schemas.length;s++){"
             "var grp=schemas[s];"
             "var sname=grp.dataset.schema||'';"
@@ -2712,10 +2701,6 @@ class SQLRunnerCM:
             "}else{"
             "grp.style.display='none';"
             "}"
-            "}"
-            "}else{"
-            # 단일 schema flat 모드
-            "anyVisible=filterTables(panel,false)||!q;"
             "}"
             "if(noMatch)noMatch.style.display=(q&&!anyVisible)?'block':'none';"
             "});"
