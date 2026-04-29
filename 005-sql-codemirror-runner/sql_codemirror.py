@@ -2543,6 +2543,15 @@ class SQLRunnerCM:
             f"transition:transform 0.1s ease}}"
             f"#entity-panel-{uid} .ep-schema.collapsed .ep-schema-caret{{"
             f"transform:rotate(-90deg)}}"
+            # 테이블 단위 컬럼 접기 — .ep-tbl.cols-collapsed 면 그 테이블의
+            # .ep-cols(컬럼 칩 영역) 만 숨김. 단, 검색 중에는 컬럼 매치를
+            # 보여줘야 하므로 entity-panel.searching 일 때 override.
+            f"#entity-panel-{uid} .ep-tbl.cols-collapsed .ep-cols{{display:none}}"
+            f"#entity-panel-{uid} .ep-tbl.cols-collapsed .ep-note{{display:none}}"
+            f"#entity-panel-{uid}.searching .ep-tbl.cols-collapsed "
+            f".ep-cols{{display:flex}}"
+            f"#entity-panel-{uid}.searching .ep-tbl.cols-collapsed "
+            f".ep-note{{display:block}}"
             f"</style>"
         )
         parts.append(f'<div id="entity-panel-{uid}" class="entity-panel">')
@@ -2554,6 +2563,12 @@ class SQLRunnerCM:
             'data-action="expand-all" title="모든 schema 그룹 펼치기">⊞</button>'
             '<button type="button" class="ep-action-btn" '
             'data-action="collapse-all" title="모든 schema 그룹 접기">⊟</button>'
+            '<button type="button" class="ep-action-btn" '
+            'data-action="expand-cols" title="모든 테이블의 컬럼 펼치기">'
+            '📋⊞</button>'
+            '<button type="button" class="ep-action-btn" '
+            'data-action="collapse-cols" title="모든 테이블의 컬럼 접기">'
+            '📋⊟</button>'
             '</span>'
             '</div>'
         )
@@ -2667,15 +2682,23 @@ class SQLRunnerCM:
             "if(!panel)return false;"
             "if(panel.dataset.wired==='1')return true;"
             "panel.dataset.wired='1';"
-            # 1) 모든 그룹 접기/펼치기 액션 버튼
+            # 1) 헤더 액션 버튼들 — schema 그룹 / 테이블 컬럼 모두 접기/펼치기
             "panel.addEventListener('click',function(e){"
             "var act=e.target.closest&&e.target.closest('.ep-action-btn');"
             "if(act&&panel.contains(act)){"
             "var action=act.dataset.action;"
+            "if(action==='collapse-all'||action==='expand-all'){"
             "var schemas=panel.querySelectorAll('.ep-schema');"
             "for(var i=0;i<schemas.length;i++){"
             "if(action==='collapse-all')schemas[i].classList.add('collapsed');"
-            "else if(action==='expand-all')schemas[i].classList.remove('collapsed');"
+            "else schemas[i].classList.remove('collapsed');"
+            "}"
+            "}else if(action==='collapse-cols'||action==='expand-cols'){"
+            "var tbls=panel.querySelectorAll('.ep-tbl');"
+            "for(var i=0;i<tbls.length;i++){"
+            "if(action==='collapse-cols')tbls[i].classList.add('cols-collapsed');"
+            "else tbls[i].classList.remove('cols-collapsed');"
+            "}"
             "}"
             "return;"
             "}"
@@ -2701,6 +2724,9 @@ class SQLRunnerCM:
             "if(search){"
             "search.addEventListener('input',function(){"
             "var q=(search.value||'').toLowerCase().trim();"
+            # 검색 중에는 cols-collapsed 를 무시 (컬럼 매치를 보여주기 위해)
+            "if(q)panel.classList.add('searching');"
+            "else panel.classList.remove('searching');"
             "var schemas=panel.querySelectorAll('.ep-schema');"
             "var anyVisible=false;"
             # 모든 schema 가 항상 그룹으로 렌더되므로 (schemas.length>=1) 단일/다중 분기 없음
