@@ -26,8 +26,8 @@
     "Cmd/Ctrl+Enter 단축키로도 ▶ 실행",
     "CM ↔ hidden ipywidgets.Textarea 동기화 — native 'input' 이벤트 dispatch 로 Python 쪽 value 자동 갱신",
     "좌측 entity 패널: 단일 HTML 위젯(검색창 + 테이블 그룹) — 위젯 객체 비용 0 으로 수백 컬럼 스키마도 즉시 렌더, JS 자체 substring 필터로 Python round-trip 없는 즉석 검색, 클릭 → CM 의 현재 커서 위치에 정확히 인서트 (마지막 부분 단어 prefix 매치 시 자동 치환)",
-    "다중 schema 지원 — add_table/from_dict/from_sqlite/from_dataframes 모두 schema= 인자 수용. 단일 schema 사용 시 사이드바는 기존과 동일한 flat 모양 유지(시각적 부담 0), 두 개 이상 등록되면 schema 별로 그룹핑되고 헤더 클릭으로 접기/펼치기. 동명 테이블이 여러 schema 에 있을 때만 schema. prefix 로 자동 disambiguate.",
-    "schema-first 자동완성 — table 컨텍스트(FROM/JOIN)에서 다중 schema 시 popup 첫 줄에 schema 후보(📁 main, 📁 staging) 표시. schema 선택 시 'public.' 인서트 후 popup 자동 재호출되어 그 schema 아래 테이블만 노출. 컬럼은 schema.table.col 3-segment qualifier 도 인식.",
+    "다중 schema 지원 — add_table/from_dict/from_sqlite/from_dataframes 모두 schema= 인자 수용. schema 갯수와 무관하게 사이드바는 항상 schema 별로 그룹핑되어 표시되며 헤더 클릭으로 접기/펼치기. 동명 테이블이 여러 schema 에 있을 때만 schema. prefix 로 자동 disambiguate.",
+    "schema-first 자동완성 — table 컨텍스트(FROM/JOIN)에서 schema 갯수와 무관하게 popup 첫 줄에 schema 후보(📁 main, 📁 staging) 표시. schema 선택 시 'public.' 인서트 후 popup 자동 재호출되어 그 schema 아래 테이블만 노출. 컬럼은 schema.table.col 3-segment qualifier 도 인식.",
     "💾 CSV / Excel 파일 저장 — 노트북 작업 디렉토리(os.getcwd()) 에 sql_result_<ts>.csv/.xlsx 로 직접 저장 후 IPython.FileLink 로 클릭 가능 링크 안내 (브라우저 다운로드와 별개 경로)",
     "외부 네트워크/CDN/바이너리 영속화 0 · 단일 .py 반입"
   ],

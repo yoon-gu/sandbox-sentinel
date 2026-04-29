@@ -208,7 +208,7 @@ runner.show()
 
 ### 다중 schema (선택)
 
-같은 이름의 테이블이 여러 환경(예: `public.users`, `staging.users`) 에 공존하는 경우, `schema=` 인자로 분리 등록할 수 있습니다. **단일 schema 만 쓰면 사이드바는 기존과 동일한 flat 모양** 으로 그대로 보입니다 — schema 헤더는 schema 가 둘 이상일 때만 자동으로 등장합니다.
+같은 이름의 테이블이 여러 환경(예: `public.users`, `staging.users`) 에 공존하는 경우, `schema=` 인자로 분리 등록할 수 있습니다. 사이드바와 자동완성은 **schema 갯수와 무관하게 항상 동일한 schema-first 동작** 을 합니다 — schema 1 개일 때도 `📁 main` 그룹 헤더가 보이고 popup 첫 줄에 schema 후보가 뜹니다 (등록 안 하면 기본 `"main"` 으로 들어감).
 
 ```python
 runner = SQLRunnerCM(on_execute=my_executor)

@@ -783,28 +783,27 @@ def get_suggestions(text: str,
             ][:30]
 
     cands: list = []
-    multi_schema = len(tables) > 1
 
     if ctx in ("tables", "general", "start"):
-        # 다중 schema 일 때만 schema 후보를 먼저 노출 (단일 schema 는 부담 0)
-        if multi_schema:
-            for sch in sorted(tables.keys()):
-                cands.append({
-                    "value": f"{sch}.",   # 인서트 시 점까지 — 사용자는 이어서 테이블명 입력
-                    "label": f"📁 {sch}",
-                    "kind": "schema",
-                    "meta": f"schema · {len(tables[sch])} tables",
-                })
+        # schema 후보를 항상 먼저 노출 — schema 갯수와 무관하게 동일하게 동작.
+        # 선택 시 'main.' 형태로 인서트되어 그 schema 의 테이블만 다시 추천.
+        for sch in sorted(tables.keys()):
+            cands.append({
+                "value": f"{sch}.",   # 인서트 시 점까지 — 사용자는 이어서 테이블명 입력
+                "label": f"📁 {sch}",
+                "kind": "schema",
+                "meta": f"schema · {len(tables[sch])} tables",
+            })
         # bare table 후보 — 동명 충돌 시 schema. prefix 로 disambiguate
         for sch, tname, _cols in _iter_tables(tables):
-            if multi_schema and name_counts.get(tname, 0) > 1:
+            if name_counts.get(tname, 0) > 1:
                 value = f"{sch}.{tname}"
                 label = value
             else:
                 value = tname
                 label = tname
             cands.append({"value": value, "label": label,
-                          "kind": "table", "meta": sch if multi_schema else "table"})
+                          "kind": "table", "meta": sch})
     if ctx in ("columns", "columns_or_star", "general", "start"):
         seen: set = set()
         for sch, tname, cols in _iter_tables(tables):
@@ -816,7 +815,7 @@ def get_suggestions(text: str,
                 col_label = (f"{c['name']} {_short_type(type_str)}"
                               if type_str else c["name"])
                 # 동명 테이블이 여러 schema 에 있으면 meta 도 schema.table
-                if multi_schema and name_counts.get(tname, 0) > 1:
+                if name_counts.get(tname, 0) > 1:
                     src = f"{sch}.{tname}"
                 else:
                     src = tname
@@ -1520,8 +1519,9 @@ _BOOTSTRAP_JS_TPL = r"""
         completeSingle: false,
         closeOnUnfocus: true,
         // Tab 은 show-hint.js 의 기본 키맵 (handle.pick) 그대로 — click 과
-        // 동등한 후보 선택. schema 후보를 Tab 으로 선택하면 makeSchemaPicker
-        // 가 호출되어 'staging.' 인서트 + popup 자동 재오픈.
+        // 동등한 후보 선택. schema 후보를 Tab 으로 선택하면 default 인서트로
+        // 'staging.' 이 들어가고 contextHint 의 'pick' 이벤트 리스너가
+        // popup 을 자동 재오픈해 그 schema 의 테이블 후보를 보여줌.
         // popup 이 닫혀 있을 땐 editor 의 extraKeys.Tab 으로 들여쓰기.
       }},
       extraKeys: {{
@@ -1611,7 +1611,6 @@ _BOOTSTRAP_JS_TPL = r"""
   // ── 다중 schema 헬퍼 ──
   // SCHEMA = {{ schemaName: {{ tableName: [cols] }} }}
   function listSchemas(){{ return Object.keys(SCHEMA).sort(); }}
-  function isMultiSchema(){{ return listSchemas().length > 1; }}
   function tablesIn(sch){{
     return SCHEMA[sch] ? Object.keys(SCHEMA[sch]).sort() : [];
   }}
@@ -1783,22 +1782,16 @@ _BOOTSTRAP_JS_TPL = r"""
     return CTX_MAP[last] || "general";
   }}
 
-  // schema 후보 클릭 후 popup 자동 재호출 — `public.` 인서트 직후 그
-  // schema 의 테이블 후보가 즉시 뜨도록. CodeMirror 5 의 hint 객체에
-  // hint(cm, data, completion) 을 주면 default 인서트를 대체 가능.
-  function makeSchemaPicker(sch){{
-    return function(cm, data, completion){{
-      // completion.from/to 는 후보 객체에 안 실려 있어 undefined →
-      // show-hint default 처럼 data.from/to 로 fallback 필수.
-      var from = completion.from || data.from;
-      var to   = completion.to   || data.to;
-      cm.replaceRange(sch + ".", from, to);
-      // 인서트가 끝난 다음 tick 에 다시 popup — completionActive 검사로 중복 방지
-      setTimeout(function(){{
-        if(cm.state && cm.state.completionActive) return;
-        cm.showHint({{ hint: contextHint, completeSingle: false }});
-      }}, 0);
-    }};
+  // schema 후보의 default 인서트(replaceRange) 가 동작한 직후 popup 을
+  // 다시 띄워 그 schema 의 테이블 후보를 보여주는 헬퍼. completion 객체에
+  // `hint` 함수를 주는 방식은 키보드 Tab/Enter 와 충돌 보고가 있어, 대신
+  // CodeMirror 의 'pick' 이벤트를 hook 한다 — default 인서트를 그대로
+  // 두므로 Enter/Tab/마우스 클릭 모두에서 일관되게 동작.
+  function rePopupAfter(cm){{
+    setTimeout(function(){{
+      if(cm.state && cm.state.completionActive) return;
+      cm.showHint({{ hint: contextHint, completeSingle: false }});
+    }}, 0);
   }}
 
   function contextHint(cm){{
@@ -1815,7 +1808,6 @@ _BOOTSTRAP_JS_TPL = r"""
     // cursor 위치까지 반영되어야 정확.
     var beforeAll = cm.getRange({{line:0,ch:0}}, cur);
     var ctx = detectContext(beforeAll);
-    var multi = isMultiSchema();
     var counts = nameCounts();
 
     // ── qualifier 처리 (점 포함 word) ──
@@ -1872,26 +1864,23 @@ _BOOTSTRAP_JS_TPL = r"""
     var seenCol = {{}};
 
     if(ctx === "tables" || ctx === "general" || ctx === "start"){{
-      // 다중 schema 일 때만 schema 후보를 가장 위에 노출 — schema-first 흐름.
-      // schema 선택 시 hint() 콜백이 popup 을 자동 재호출해 그 schema 의
-      // 테이블 후보를 즉시 보여줌.
-      if(multi){{
-        listSchemas().forEach(function(sch){{
-          var n = tablesIn(sch).length;
-          cands.push({{
-            text: sch + ".",
-            displayText: "📁 " + sch + "  · schema (" + n + ")",
-            hint: makeSchemaPicker(sch)
-          }});
+      // schema 후보를 항상 가장 위에 노출 — schema 갯수와 무관 (single source).
+      // 선택 시 default 인서트로 'main.' 가 들어가고, 결과 객체에 등록한
+      // 'pick' 리스너가 popup 을 재호출하여 그 schema 의 테이블 후보 노출.
+      listSchemas().forEach(function(sch){{
+        var n = tablesIn(sch).length;
+        cands.push({{
+          text: sch + ".",
+          displayText: "📁 " + sch + "  · schema (" + n + ")",
+          _isSchema: true   // pick 후 popup 재호출 마커
         }});
-      }}
+      }});
       // bare table 후보 — schema 후보 다음. 동명 충돌은 schema. prefix
       iterTables().forEach(function(t){{
-        var ambiguous = multi && counts[t.name] > 1;
+        var ambiguous = counts[t.name] > 1;
         var txt = ambiguous ? (t.schema + "." + t.name) : t.name;
-        var meta = multi ? t.schema : "table";
         cands.push({{ text: txt,
-                     displayText: txt + "  · " + meta }});
+                     displayText: txt + "  · " + t.schema }});
       }});
     }}
     if(ctx === "columns" || ctx === "columns_or_star" ||
@@ -1901,7 +1890,7 @@ _BOOTSTRAP_JS_TPL = r"""
           if(seenCol[c.name]) return;
           seenCol[c.name] = 1;
           // 동명 테이블이 여러 schema 에 있으면 표시도 schema.table 로
-          var src = (multi && counts[t.name] > 1)
+          var src = (counts[t.name] > 1)
             ? (t.schema + "." + t.name) : t.name;
           var disp = c.type
             ? (c.name + " " + shortType(c.type) + "  · " + src)
@@ -1945,11 +1934,19 @@ _BOOTSTRAP_JS_TPL = r"""
         return c.text.toLowerCase().indexOf(fl) >= 0;
       }});
     }}
-    return {{
+    var result = {{
       list: cands.slice(0, 50),
       from: CodeMirror.Pos(cur.line, start),
       to:   CodeMirror.Pos(cur.line, end),
     }};
+    // schema 후보가 선택되면 (Tab/Enter/마우스 모두) popup 을 자동 재호출
+    // → 그 schema 의 테이블 후보가 즉시 노출. default 인서트는 그대로 동작.
+    CodeMirror.on(result, "pick", function(completion){{
+      if(completion && completion._isSchema){{
+        rePopupAfter(cm);
+      }}
+    }});
+    return result;
   }}
 }})();
 """
@@ -2491,9 +2488,21 @@ class SQLRunnerCM:
             f"#entity-panel-{uid} *::before,"
             f"#entity-panel-{uid} *::after{{box-sizing:border-box}}"
             f"#entity-panel-{uid} .ep-header{{"
-            f"padding:8px 10px;font-weight:600;font-size:12px;"
+            f"display:flex;align-items:center;justify-content:space-between;"
+            f"padding:6px 10px;font-weight:600;font-size:12px;"
             f"background:#eef0f3;border-bottom:1px solid #d8dde1;"
             f"position:sticky;top:0;z-index:1}}"
+            f"#entity-panel-{uid} .ep-header-actions{{"
+            f"display:flex;gap:3px}}"
+            f"#entity-panel-{uid} .ep-action-btn{{"
+            f"padding:1px 6px;background:#fff;border:1px solid #c8ccd0;"
+            f"border-radius:3px;cursor:pointer;font-size:11px;"
+            f"color:#1f2329;line-height:1.4;font-weight:400}}"
+            f"#entity-panel-{uid} .ep-action-btn:hover{{"
+            f"background:#dbe6f0;border-color:#0369a1}}"
+            f"#entity-panel-{uid} .ep-col-type{{"
+            f"display:inline-block;margin-right:3px;"
+            f"opacity:0.85;font-size:10px}}"
             f"#entity-panel-{uid} .ep-search-wrap{{"
             f"padding:6px 8px;background:#f7f8fa;"
             f"border-bottom:1px solid #e3e6e9;"
@@ -2545,10 +2554,37 @@ class SQLRunnerCM:
             f"transition:transform 0.1s ease}}"
             f"#entity-panel-{uid} .ep-schema.collapsed .ep-schema-caret{{"
             f"transform:rotate(-90deg)}}"
+            # 테이블 단위 컬럼 접기 — .ep-tbl.cols-collapsed 면 그 테이블의
+            # .ep-cols(컬럼 칩 영역) 만 숨김. 단, 검색 중에는 컬럼 매치를
+            # 보여줘야 하므로 entity-panel.searching 일 때 override.
+            f"#entity-panel-{uid} .ep-tbl.cols-collapsed .ep-cols{{display:none}}"
+            f"#entity-panel-{uid} .ep-tbl.cols-collapsed .ep-note{{display:none}}"
+            f"#entity-panel-{uid}.searching .ep-tbl.cols-collapsed "
+            f".ep-cols{{display:flex}}"
+            f"#entity-panel-{uid}.searching .ep-tbl.cols-collapsed "
+            f".ep-note{{display:block}}"
             f"</style>"
         )
         parts.append(f'<div id="entity-panel-{uid}" class="entity-panel">')
-        parts.append('<div class="ep-header">📚 Entities</div>')
+        parts.append(
+            '<div class="ep-header">'
+            '<span>📚 Entities</span>'
+            '<span class="ep-header-actions">'
+            # schema 그룹 토글 — 1 개라도 펼쳐져 있으면 모두 접고, 아니면 모두 펼침
+            '<button type="button" class="ep-action-btn" '
+            'data-action="toggle-schemas" '
+            'title="📁 schema 그룹 모두 토글 — 클릭하면 모든 schema 의 '
+            '테이블 목록을 한 번에 숨기거나 보여줍니다 (헤더만 남기기 / '
+            '전체 펼치기 자동 결정).">📁</button>'
+            # 테이블 컬럼 토글 — 컬럼 영역만 토글 (테이블 행은 유지)
+            '<button type="button" class="ep-action-btn" '
+            'data-action="toggle-cols" '
+            'title="📋 테이블 컬럼 모두 토글 — 클릭하면 모든 테이블의 컬럼 '
+            '칩 영역만 한 번에 숨기거나 보여줍니다 (테이블 행은 그대로 유지).">'
+            '📋</button>'
+            '</span>'
+            '</div>'
+        )
         parts.append(
             '<div class="ep-search-wrap">'
             '<input type="search" class="ep-search" '
@@ -2563,32 +2599,30 @@ class SQLRunnerCM:
                 '로 추가하세요.</div>'
             )
         else:
-            multi = len(self.tables) > 1
             name_counts = self._table_name_counts()
+            # schema 갯수와 무관하게 항상 schema 그룹으로 렌더 — 단일 schema
+            # 도 다중과 동일하게 📁 schema (n) 헤더 + 테이블 목록 구조.
             for sch in sorted(self.tables.keys()):
                 sch_tables = self.tables[sch]
-                # 다중 schema 일 때만 schema 그룹 헤더 노출 — 단일 schema 는
-                # 기존 005 와 동일한 flat 모양 유지 (시각적 부담 0).
-                if multi:
-                    parts.append(
-                        f'<div class="ep-schema" '
-                        f'data-schema="{escape(sch.lower())}">'
-                    )
-                    # IDE 관습대로 헤더 클릭은 그룹 접기/펼치기 (DataGrip/DBeaver
-                    # 패턴). 에디터에 `schema.` 인서트는 자동완성 popup
-                    # (schema 후보 클릭) 으로 충분.
-                    parts.append(
-                        f'<button type="button" '
-                        f'class="ep-schema-hdr" '
-                        f'title="클릭하여 그룹 접기/펼치기">'
-                        f'<span class="ep-schema-caret">▼</span> '
-                        f'📁 {escape(sch)}  ({len(sch_tables)})'
-                        f'</button>'
-                    )
+                parts.append(
+                    f'<div class="ep-schema" '
+                    f'data-schema="{escape(sch.lower())}">'
+                )
+                # IDE 관습대로 헤더 클릭은 그룹 접기/펼치기 (DataGrip/DBeaver
+                # 패턴). 에디터에 `schema.` 인서트는 자동완성 popup
+                # (schema 후보 클릭) 으로 충분.
+                parts.append(
+                    f'<button type="button" '
+                    f'class="ep-schema-hdr" '
+                    f'title="클릭하여 그룹 접기/펼치기">'
+                    f'<span class="ep-schema-caret">▼</span> '
+                    f'📁 {escape(sch)}  ({len(sch_tables)})'
+                    f'</button>'
+                )
                 for tname in sorted(sch_tables.keys()):
                     cols = sch_tables[tname]
                     # 동명 테이블이 여러 schema 에 있으면 인서트도 schema.table 로
-                    if multi and name_counts.get(tname, 0) > 1:
+                    if name_counts.get(tname, 0) > 1:
                         snippet = f"{sch}.{tname}"
                     else:
                         snippet = tname
@@ -2615,17 +2649,28 @@ class SQLRunnerCM:
                         cname = c["name"]
                         cname_q = quote(cname, safe="")
                         doc = c.get("doc", "") or ""
+                        ctype = c.get("type", "") or ""
+                        # type 이 있으면 짧은 이모지를 변수명 앞에 prefix
+                        # — popup 자동완성과 동일한 _short_type 매핑 사용
+                        type_emoji = _short_type(ctype) if ctype else ""
+                        emoji_html = (
+                            f'<span class="ep-col-type">{escape(type_emoji)}</span>'
+                            if type_emoji else ""
+                        )
+                        # tooltip 에 type + doc 둘 다 노출
+                        tip_parts = [p for p in (ctype, doc) if p]
+                        tip = " · ".join(tip_parts)
                         parts.append(
                             f'<button type="button" '
                             f'class="ep-btn ep-col-btn" '
                             f'data-snippet="{cname_q}" '
                             f'data-cname="{escape(cname.lower())}" '
-                            f'title="{escape(doc)}">{escape(cname)}</button>'
+                            f'title="{escape(tip)}">'
+                            f'{emoji_html}{escape(cname)}</button>'
                         )
                     parts.append('</div>')   # ep-cols
                     parts.append('</div>')   # ep-tbl
-                if multi:
-                    parts.append('</div>')   # ep-schema
+                parts.append('</div>')   # ep-schema
             # 검색 결과 0개일 때 안내 메시지 (JS 에서 toggle)
             parts.append(
                 '<div class="ep-no-match">검색 결과가 없습니다.</div>'
@@ -2650,15 +2695,47 @@ class SQLRunnerCM:
             "if(!panel)return false;"
             "if(panel.dataset.wired==='1')return true;"
             "panel.dataset.wired='1';"
-            # 1) schema 헤더 클릭 → 그룹 접기/펼치기 (인서트 없음)
+            # 1) 헤더 액션 버튼 — schema 그룹 / 테이블 컬럼 토글 (모두 펼침 ↔ 모두 접힘)
+            #    토글 정책: 하나라도 펼쳐져 있으면 → 모두 접고,
+            #               모두 접혀 있으면 → 모두 펼치기.
+            #    이로써 4 개 버튼을 2 개 토글로 단순화하면서 기능 유지.
             "panel.addEventListener('click',function(e){"
+            "var act=e.target.closest&&e.target.closest('.ep-action-btn');"
+            "if(act&&panel.contains(act)){"
+            "var action=act.dataset.action;"
+            "if(action==='toggle-schemas'){"
+            "var schemas=panel.querySelectorAll('.ep-schema');"
+            # 펼쳐진 그룹이 하나라도 있으면 모두 접기
+            "var anyExpanded=false;"
+            "for(var i=0;i<schemas.length;i++){"
+            "if(!schemas[i].classList.contains('collapsed')){anyExpanded=true;break;}"
+            "}"
+            "for(var i=0;i<schemas.length;i++){"
+            "if(anyExpanded)schemas[i].classList.add('collapsed');"
+            "else schemas[i].classList.remove('collapsed');"
+            "}"
+            "}else if(action==='toggle-cols'){"
+            "var tbls=panel.querySelectorAll('.ep-tbl');"
+            # 컬럼이 펼쳐진 테이블이 하나라도 있으면 모두 접기
+            "var anyExpanded=false;"
+            "for(var i=0;i<tbls.length;i++){"
+            "if(!tbls[i].classList.contains('cols-collapsed')){anyExpanded=true;break;}"
+            "}"
+            "for(var i=0;i<tbls.length;i++){"
+            "if(anyExpanded)tbls[i].classList.add('cols-collapsed');"
+            "else tbls[i].classList.remove('cols-collapsed');"
+            "}"
+            "}"
+            "return;"
+            "}"
+            # 2) schema 헤더 클릭 → 그룹 접기/펼치기 (인서트 없음)
             "var hdr=e.target.closest&&e.target.closest('.ep-schema-hdr');"
             "if(hdr&&panel.contains(hdr)){"
             "var grp=hdr.closest('.ep-schema');"
             "if(grp)grp.classList.toggle('collapsed');"
             "return;"
             "}"
-            # 2) 테이블/컬럼 버튼 클릭 → 에디터 인서트
+            # 3) 테이블/컬럼 버튼 클릭 → 에디터 인서트
             "var btn=e.target.closest&&e.target.closest('.ep-btn');"
             "if(!btn||!panel.contains(btn))return;"
             "var raw=btn.dataset.snippet||'';"
@@ -2673,9 +2750,12 @@ class SQLRunnerCM:
             "if(search){"
             "search.addEventListener('input',function(){"
             "var q=(search.value||'').toLowerCase().trim();"
+            # 검색 중에는 cols-collapsed 를 무시 (컬럼 매치를 보여주기 위해)
+            "if(q)panel.classList.add('searching');"
+            "else panel.classList.remove('searching');"
             "var schemas=panel.querySelectorAll('.ep-schema');"
             "var anyVisible=false;"
-            # schema 그룹별 처리 (단일 schema 일 때는 schemas.length=0 → tables 만 직접 처리)
+            # 모든 schema 가 항상 그룹으로 렌더되므로 (schemas.length>=1) 단일/다중 분기 없음
             "function filterTables(scope,schemaMatched){"
             "var tbls=scope.querySelectorAll('.ep-tbl');"
             "var grpHasVisible=false;"
@@ -2706,8 +2786,6 @@ class SQLRunnerCM:
             "}"
             "return grpHasVisible;"
             "}"
-            "if(schemas.length>0){"
-            # multi-schema 모드
             "for(var s=0;s<schemas.length;s++){"
             "var grp=schemas[s];"
             "var sname=grp.dataset.schema||'';"
@@ -2720,10 +2798,6 @@ class SQLRunnerCM:
             "}else{"
             "grp.style.display='none';"
             "}"
-            "}"
-            "}else{"
-            # 단일 schema flat 모드
-            "anyVisible=filterTables(panel,false)||!q;"
             "}"
             "if(noMatch)noMatch.style.display=(q&&!anyVisible)?'block':'none';"
             "});"
