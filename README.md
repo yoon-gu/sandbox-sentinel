@@ -1,7 +1,11 @@
 # sandbox-sentinel
 
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/yghwang)
+
 > **한국 금융사 폐쇄망 환경**을 위한 **오픈소스 → single-file Python 변환물 모음**과,
 > 변환 작업을 돕는 **Claude Code Agent 설정 & Skill**을 함께 담은 리포지토리입니다.
+
+이 리포가 도움이 되셨다면 ☕ [Ko-fi 에서 후원](https://ko-fi.com/yghwang) 해 주세요. GitHub 우측 사이드바의 **Sponsor** 버튼으로도 같은 페이지로 이동합니다.
 
 ## 이 리포는 무엇인가요? (처음 오신 분을 위한 안내)
 
