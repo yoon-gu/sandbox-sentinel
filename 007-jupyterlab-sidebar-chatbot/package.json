@@ -1,0 +1,65 @@
+{
+  "name": "jlab-sidebar-chatbot",
+  "version": "0.1.0",
+  "description": "JupyterLab 우측 사이드바 챗봇 (Mock LLM + 교체 가능한 어댑터)",
+  "keywords": [
+    "jupyter",
+    "jupyterlab",
+    "jupyterlab-extension"
+  ],
+  "homepage": "https://github.com/yoon-gu/sandbox-sentinel",
+  "bugs": {
+    "url": "https://github.com/yoon-gu/sandbox-sentinel/issues"
+  },
+  "license": "BSD-3-Clause",
+  "author": {
+    "name": "Code Conversion Agent"
+  },
+  "files": [
+    "lib/**/*.{d.ts,eot,gif,html,jpg,js,js.map,json,png,svg,woff2,ttf}",
+    "style/**/*.{css,js,eot,gif,html,jpg,json,png,svg,woff2,ttf}"
+  ],
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "style": "style/index.css",
+  "styleModule": "style/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yoon-gu/sandbox-sentinel.git"
+  },
+  "scripts": {
+    "build": "jlpm build:lib && jlpm build:labextension:dev",
+    "build:prod": "jlpm clean && jlpm build:lib:prod && jlpm build:labextension",
+    "build:lib": "tsc --sourceMap",
+    "build:lib:prod": "tsc",
+    "build:labextension": "jupyter labextension build .",
+    "build:labextension:dev": "jupyter labextension build --development True .",
+    "clean": "jlpm clean:lib",
+    "clean:lib": "rimraf lib tsconfig.tsbuildinfo",
+    "clean:labextension": "rimraf jlab_sidebar_chatbot/labextension",
+    "clean:all": "jlpm clean:lib && jlpm clean:labextension",
+    "install:extension": "jlpm build"
+  },
+  "dependencies": {
+    "@jupyterlab/application": "^4.0.0",
+    "@jupyterlab/ui-components": "^4.0.0",
+    "@lumino/messaging": "^2.0.0",
+    "@lumino/widgets": "^2.0.0"
+  },
+  "devDependencies": {
+    "@jupyterlab/builder": "^4.0.0",
+    "rimraf": "^5.0.0",
+    "typescript": "~5.5.0"
+  },
+  "resolutions": {
+    "webpack": "5.88.2"
+  },
+  "sideEffects": [
+    "style/*.css",
+    "style/index.js"
+  ],
+  "jupyterlab": {
+    "extension": true,
+    "outputDir": "jlab_sidebar_chatbot/labextension"
+  }
+}

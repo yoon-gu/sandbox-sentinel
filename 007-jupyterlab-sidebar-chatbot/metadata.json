@@ -1,0 +1,42 @@
+{
+  "id": "007",
+  "name": "jupyterlab-sidebar-chatbot",
+  "source": {
+    "library": "jupyterlab/extension-examples 의 shout-button-message (우측 사이드바 Widget UI 패턴) + 001 챗봇 두뇌 패턴 재구현",
+    "version": "JupyterLab 4.5.x",
+    "url": "https://github.com/jupyterlab/extension-examples/tree/main/shout-button-message",
+    "license": "BSD-3-Clause",
+    "commit_sha": "N/A (예제 UI 패턴 참고, 코드는 자체 작성)"
+  },
+  "converted_at": "2026-05-27",
+  "agent_version": "0.1.0",
+  "dependencies_used": [
+    "표준 라이브러리만 (http.server, threading, json) — 두뇌 + 셀 localhost 서버. jupyter_server 불필요",
+    "@jupyterlab/application, ui-components (^4)  # 프론트(빌드시)",
+    "@lumino/widgets, @lumino/messaging (^2)  # 사이드바 Widget + onAfterAttach/onBeforeDetach 라이프사이클"
+  ],
+  "extracted_features": [
+    "shout-button-message 예제 패턴: Widget 상속 + 생성자 DOM 구성 + onAfterAttach/onBeforeDetach 에서 이벤트 등록/해제 (예제의 bind 중복 해제 버그는 arrow 필드로 교정)",
+    "JupyterLab 우측 사이드바('right')에 탭으로 도킹되는 챗봇 위젯 (app.shell.add(widget, 'right'))",
+    "jupyter 서버 재시작 불필요 설계: 프론트 labextension 은 설치+브라우저 새로고침만으로 로드(jupyter 가 페이지 로드마다 labextensions 폴더 스캔), 두뇌는 jupyter 서버 익스텐션이 아니라 '노트북 셀에서 start_brain_server() 로 띄우는 localhost HTTP 서버'로 분리",
+    "두뇌 서버: 표준 라이브러리 http.server(ThreadingHTTPServer) 로 백그라운드 스레드 기동 + CORS, /chat·/reset·/health 엔드포인트. 프론트는 http://127.0.0.1:8765 로 fetch",
+    "멀티턴 ChatBrain (session_id별 맥락 유지, 메모리 영속화 없음)",
+    "Mock LLM 기본 탑재 — 모델 weight·인터넷 없이 전체 흐름 즉시 체험",
+    "교체 가능한 LLMAdapter 인터페이스 — generate(messages) 하나만 구현하면 start_brain_server(brain=ChatBrain(adapter=...)) 로 사내 LLM 전환 (001 패턴)"
+  ],
+  "limitations": [
+    "localhost 전제: 브라우저의 127.0.0.1 과 커널이 같은 기계여야 함(로컬/컨테이너/SSH 포트포워딩). 브라우저가 원격 호스트명으로 접속하면 셀 서버에 닿지 못함 — 그 경우 프론트↔커널 웹소켓 직접 통신 방식 필요(미구현).",
+    "매 커널 세션마다 start_brain_server() 한 줄 실행 필요(자동 시작 아님). 포트 기본 8765 — server.py 와 handler.ts 의 상수가 일치해야 함.",
+    "single-file 일탈: 정통 TS labextension 이라 .py 한 파일이 아니며 다수 파일 + npm 빌드가 필요합니다. 폐쇄망 반입은 빌드된 wheel(.whl) 단위, 빌드 시점에만 외부 npm 접근 필요(산출 wheel 에는 외부 참조 없음).",
+    "Mock LLM 은 규칙 기반 에코일 뿐 실제 추론을 하지 않습니다 — 운영 전 사내 LLM 어댑터 연결 필요.",
+    "대화 기록은 커널 프로세스 메모리에만 존재 — 커널 재시작 / stop_brain_server() 시 사라집니다(바이너리 영속화 금지 원칙 준수).",
+    "JupyterLab 4 전용 (3.x 미지원)."
+  ],
+  "build": {
+    "frontend": "jlpm install && jlpm run build:prod",
+    "wheel": "pip wheel . -w dist",
+    "install": "pip install jlab_sidebar_chatbot-*.whl  (또는 dev: pip install -e . --no-build-isolation)",
+    "use": "브라우저 새로고침 → 우측 💬 탭 / 노트북 셀: from jlab_sidebar_chatbot import start_brain_server; start_brain_server()",
+    "verified_2026-05-27": "jlpm build:prod 성공(webpack 5.88.2). 실행 중 jupyter 서버에 labextension 설치 후 재시작 없이 새로고침으로 프론트 로드 확인(federated 등록 0→1, static 404→200). 셀 localhost 서버 chat 200 + CORS + 멀티턴 확인."
+  }
+}

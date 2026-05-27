@@ -1,0 +1,5 @@
+{
+  "packageManager": "python",
+  "packageName": "jlab_sidebar_chatbot",
+  "uninstallInstructions": "pip 등 사용하던 Python 패키지 매니저로 jlab_sidebar_chatbot 를 제거하세요."
+}
