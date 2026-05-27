@@ -24,11 +24,11 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11"
 ]
-# 두뇌 = deepagents(langgraph) + Claude. ⚠️ 온라인/개발 전용(외부망 + httpx 계열).
-# 폐쇄망에서는 이 의존성을 사내 LLM 스택으로 바꿔서 빌드하세요.
+# 두뇌 = deepagents(langgraph) 프레임워크만 런타임 의존성으로 선언.
+# 모델 라이브러리(langchain-anthropic 등)는 사용자가 graph.py 를 수정해 직접 선택 →
+# 하드 의존성으로 두지 않음. (Claude 기본을 그대로 쓰려면 langchain-anthropic 별도 설치)
 dependencies = [
   "deepagents>=0.4.5",
-  "langchain-anthropic>=0.1.0",
 ]
 dynamic = ["version"]
 
