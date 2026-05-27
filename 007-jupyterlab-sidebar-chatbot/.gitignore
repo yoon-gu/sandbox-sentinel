@@ -7,3 +7,4 @@ jlab_sidebar_chatbot/labextension/
 .yarn/
 .pnp.*
 yarn.lock
+dist/
