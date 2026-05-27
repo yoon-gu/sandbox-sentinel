@@ -9,6 +9,7 @@ import {
   JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
+import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { LabIcon } from '@jupyterlab/ui-components';
 
 import { ChatWidget } from './widget';
@@ -25,11 +26,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
   id: 'jlab-sidebar-chatbot:plugin',
   description: 'JupyterLab 우측 사이드바에 챗봇 탭을 추가합니다.',
   autoStart: true,
-  activate: (app: JupyterFrontEnd) => {
+  requires: [IRenderMimeRegistry], // 챗봇 응답을 마크다운으로 렌더하기 위해
+  activate: (app: JupyterFrontEnd, rendermime: IRenderMimeRegistry) => {
     console.log('JupyterLab extension jlab-sidebar-chatbot is activated!');
 
     // 챗봇 위젯을 만들어 우측 사이드바에 추가합니다(shout 예제와 동일한 패턴).
-    const widget = new ChatWidget();
+    const widget = new ChatWidget(rendermime);
     widget.id = 'jlab-sidebar-chatbot-widget'; // Widget 은 id 가 필요합니다.
     widget.title.icon = new LabIcon({
       name: 'jlab-sidebar-chatbot:chat',

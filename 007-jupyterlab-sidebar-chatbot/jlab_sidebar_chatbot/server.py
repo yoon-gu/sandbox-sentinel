@@ -6,7 +6,7 @@ langgraph 그래프를 localhost HTTP 로 서빙하는 얕은 전송 계층.
 호출하는 /chat·/reset·/health 만 제공합니다(직접 만든 LLM 클래스는 없습니다).
 
 엔드포인트:
-    POST  /chat    {session_id, message} -> {role, content}
+    POST  /chat    {session_id, message} -> {role, answer, steps}  (steps=도구 단계, 접이식)
     POST  /reset   {session_id}          -> {ok: true}   (해당 세션 thread 를 새로 분기)
     GET   /health                         -> {ok: true}
 
@@ -24,7 +24,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, Optional
 
-from .graph import build_chat_graph, reply
+from .graph import build_chat_graph, run_turn
 
 # 프론트엔드(handler.ts)의 DEFAULT_PORT 와 반드시 일치해야 합니다.
 DEFAULT_PORT = 8765
@@ -85,11 +85,12 @@ def _make_handler(graph):
                     self._json(400, {"error": "message 가 비어 있습니다"})
                     return
                 try:
-                    text = reply(graph, thread_id(session_id), message)
+                    out = run_turn(graph, thread_id(session_id), message)
                 except Exception as exc:  # 그래프/LLM 호출 실패를 클라이언트에 전달
                     self._json(500, {"error": f"그래프 호출 실패: {exc}"})
                     return
-                self._json(200, {"role": "assistant", "content": text})
+                # answer = 최종 답변(마크다운), steps = 접어서 보여줄 도구 단계들
+                self._json(200, {"role": "assistant", **out})
             elif path.endswith("/reset"):
                 reset_gen[session_id] = reset_gen.get(session_id, 0) + 1
                 self._json(200, {"ok": True})

@@ -134,3 +134,51 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ── 마크다운 렌더(최종 답변) — 말풍선 안 여백 정리 ── */
+.jp-ChatWidget-markdown :first-child {
+  margin-top: 0;
+}
+.jp-ChatWidget-markdown :last-child {
+  margin-bottom: 0;
+}
+.jp-ChatWidget-markdown pre,
+.jp-ChatWidget-markdown code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── 도구·중간 단계 (기본 접힘 <details>) ── */
+.jp-ChatWidget-steps {
+  margin-bottom: 6px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 6px;
+  background: var(--jp-layout-color1);
+  font-size: var(--jp-ui-font-size0);
+}
+.jp-ChatWidget-steps > summary {
+  cursor: pointer;
+  padding: 4px 8px;
+  color: var(--jp-ui-font-color2);
+  user-select: none;
+}
+.jp-ChatWidget-step {
+  padding: 4px 8px;
+  border-top: 1px solid var(--jp-border-color2);
+}
+.jp-ChatWidget-stepLabel {
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+}
+.jp-ChatWidget-stepDetail {
+  margin: 4px 0 0;
+  padding: 6px;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--jp-layout-color0);
+  border-radius: 4px;
+  font-family: var(--jp-code-font-family, monospace);
+  font-size: var(--jp-code-font-size, 12px);
+}

@@ -3,10 +3,12 @@
 // 구조는 공식 예제 jupyterlab/extension-examples 의 shout-button-message 를 따릅니다.
 //   - Widget 을 상속하고 생성자에서 DOM 을 구성
 //   - 이벤트 리스너는 onAfterAttach 에서 등록하고 onBeforeDetach 에서 해제
-// (예제는 addEventListener/removeEventListener 에 each `this.shout.bind(this)` 를
-//  넘겨 실제로는 해제가 안 되는 작은 버그가 있습니다. 여기서는 동일한 함수 참조를
-//  유지하도록 화살표 함수 필드로 바인딩해 정확히 해제되게 했습니다.)
+//
+// 응답 렌더:
+//   - 최종 답변(answer)은 JupyterLab 마크다운 렌더러(IRenderMimeRegistry)로 렌더(sanitize 됨).
+//   - 도구/중간 단계(steps)는 <details> 로 기본 접힘, 클릭 시 펼침.
 
+import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { Message } from '@lumino/messaging';
 import { Widget } from '@lumino/widgets';
 
@@ -17,19 +19,34 @@ interface ChatMessage {
   content: string;
 }
 
+/** 한 턴의 중간 단계(도구 호출/결과/생각). */
+interface ChatStep {
+  type: string;
+  label: string;
+  detail: string;
+}
+
+/** /chat 응답 형태. */
+interface ChatReply {
+  answer?: string;
+  steps?: ChatStep[];
+}
+
 /** 챗봇 사이드바 위젯. */
 export class ChatWidget extends Widget {
+  private _rendermime: IRenderMimeRegistry;
   private _sessionId: string;
   private _messagesNode: HTMLDivElement;
   private _input: HTMLTextAreaElement;
   private _sendButton: HTMLElement;
   private _newButton: HTMLElement;
 
-  constructor() {
+  constructor(rendermime: IRenderMimeRegistry) {
     super();
+    this._rendermime = rendermime;
     this.addClass('jp-ChatWidget');
 
-    // 위젯마다 고유 세션 id — 서버가 대화 맥락을 이 키로 구분합니다.
+    // 위젯마다 고유 세션 id — 서버가 대화 맥락(thread)을 이 키로 구분합니다.
     this._sessionId = `jlsc-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 
     // ── 헤더: 제목 + 새 대화 버튼 ──
@@ -112,15 +129,66 @@ export class ChatWidget extends Widget {
     }
   };
 
-  /** 메시지 한 건을 말풍선으로 그려 목록에 추가합니다. */
+  /** 메시지 한 건을 말풍선(평문)으로 그려 목록에 추가합니다. */
   private _appendMessage(message: ChatMessage): HTMLDivElement {
     const bubble = document.createElement('div');
     bubble.classList.add('jp-ChatWidget-bubble', `jp-mod-${message.role}`);
     bubble.innerText = message.content;
     this._messagesNode.appendChild(bubble);
-    // 항상 최신 메시지가 보이도록 스크롤을 맨 아래로.
-    this._messagesNode.scrollTop = this._messagesNode.scrollHeight;
+    this._scrollToBottom();
     return bubble;
+  }
+
+  private _scrollToBottom(): void {
+    this._messagesNode.scrollTop = this._messagesNode.scrollHeight;
+  }
+
+  /** 최종 답변을 JupyterLab 마크다운 렌더러로 host 에 렌더(sanitize 됨). */
+  private async _renderMarkdown(host: HTMLElement, markdown: string): Promise<void> {
+    try {
+      const model = this._rendermime.createModel({
+        data: { 'text/markdown': markdown }
+      });
+      const renderer = this._rendermime.createRenderer('text/markdown');
+      await renderer.renderModel(model);
+      renderer.addClass('jp-ChatWidget-markdown');
+      host.appendChild(renderer.node);
+    } catch {
+      // 렌더 실패 시 평문 폴백
+      const fallback = document.createElement('div');
+      fallback.innerText = markdown;
+      host.appendChild(fallback);
+    }
+    this._scrollToBottom();
+  }
+
+  /** 도구/중간 단계를 기본-접힌 <details> 로 만듭니다(클릭 시 펼침). */
+  private _buildSteps(steps: ChatStep[]): HTMLDetailsElement {
+    const details = document.createElement('details');
+    details.className = 'jp-ChatWidget-steps';
+
+    const summary = document.createElement('summary');
+    summary.innerText = `🔧 도구·중간 단계 ${steps.length}개 (클릭해서 펼치기)`;
+    details.appendChild(summary);
+
+    for (const step of steps) {
+      const item = document.createElement('div');
+      item.className = 'jp-ChatWidget-step';
+
+      const label = document.createElement('div');
+      label.className = 'jp-ChatWidget-stepLabel';
+      label.innerText = step.label || step.type || 'step';
+      item.appendChild(label);
+
+      if (step.detail) {
+        const detail = document.createElement('pre');
+        detail.className = 'jp-ChatWidget-stepDetail';
+        detail.innerText = step.detail;
+        item.appendChild(detail);
+      }
+      details.appendChild(item);
+    }
+    return details;
   }
 
   /** 전송 중에는 입력/버튼을 잠가 중복 전송을 막습니다. */
@@ -129,7 +197,7 @@ export class ChatWidget extends Widget {
     (this._sendButton as HTMLButtonElement).disabled = busy;
   }
 
-  /** 입력값을 서버로 보내고 응답을 받아 표시합니다. */
+  /** 입력값을 서버로 보내고, 도구 단계(접힘) + 최종 답변(마크다운)을 표시합니다. */
   private async _send(): Promise<void> {
     const text = this._input.value.trim();
     if (!text) {
@@ -140,17 +208,21 @@ export class ChatWidget extends Widget {
     this._input.value = '';
     this._setBusy(true);
 
-    // 응답을 기다리는 동안 "…" 자리표시 말풍선을 보여줍니다.
     const pending = this._appendMessage({ role: 'assistant', content: '…' });
     pending.classList.add('jp-mod-pending');
 
     try {
-      const reply = await requestBrain<ChatMessage>('chat', {
+      const reply = await requestBrain<ChatReply>('chat', {
         method: 'POST',
         body: JSON.stringify({ session_id: this._sessionId, message: text })
       });
       pending.classList.remove('jp-mod-pending');
-      pending.innerText = reply.content;
+      pending.innerText = '';
+      // 도구·중간 단계는 접어서 먼저(클릭하면 펼침), 그 아래 최종 답변을 마크다운으로
+      if (reply.steps && reply.steps.length) {
+        pending.appendChild(this._buildSteps(reply.steps));
+      }
+      await this._renderMarkdown(pending, reply.answer || '(빈 응답)');
     } catch (error) {
       pending.classList.remove('jp-mod-pending', 'jp-mod-assistant');
       pending.classList.add('jp-mod-error');
