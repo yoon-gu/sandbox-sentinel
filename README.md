@@ -32,7 +32,7 @@
 .venv/bin/pip install --no-deps textual==6.11.0
 
 # 3) 변환물 실행 (예시)
-.venv/bin/jupyter lab                                  # 001/005/006 노트북
+.venv/bin/jupyter lab                                  # 001/005/006/007 노트북
 .venv/bin/python 003-langgraph-chat-repl/basic_usage.py
 .venv/bin/python 004-langgraph-prompt-toolkit-repl/basic_usage.py
 .venv/bin/python 006-sql-tui-runner/basic_usage.py
@@ -93,6 +93,7 @@ Claude Code는 다음 경로의 Skill만 자동 인식합니다.
 | 004 | [langgraph-prompt-toolkit-repl](004-langgraph-prompt-toolkit-repl/) | langgraph + prompt_toolkit (MIT · BSD) | 003 의 prompt_toolkit 판 — textual 없이도 동작 (ipython 전이 의존) |
 | 005 | [sql-codemirror-runner](005-sql-codemirror-runner/) | CodeMirror 5.65.16 (MIT) | CodeMirror 인라인 임베드 — Jupyter 셀 안에서 IDE 같은 SQL 편집 + popup 자동완성 + Cmd/Ctrl+Enter 실행 |
 | 006 | [sql-tui-runner](006-sql-tui-runner/) | Textual 6.11.0 (MIT) | 터미널 풀스크린 SQL Runner — Textual TextArea native SQL color + Tab 인라인 자동완성 + Ctrl+R 실행 (ssh 친화) |
+| 007 | [langgraph-sidebar-chat](007-langgraph-sidebar-chat/) | langgraph (MIT) + sidecar (BSD) | JupyterLab 우측 사이드바 챗봇 — 노트북 변수 인식(get_ipython().user_ns) + 로컬 LLM(urllib) + self-contained HTML 내보내기 |
 
 각 폴더의 `README.md`에 설치·사용법·제약이 한글로 정리되어 있습니다.
 

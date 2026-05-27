@@ -1,0 +1,42 @@
+{
+  "id": "007",
+  "name": "langgraph-sidebar-chat",
+  "source": {
+    "library": "langgraph",
+    "version": "1.0.10",
+    "url": "https://github.com/langchain-ai/langgraph",
+    "license": "MIT",
+    "commit_sha": "N/A (라이브러리 의존 사용; 코드 복제 아님)"
+  },
+  "converted_at": "2026-05-27",
+  "agent_version": "0.1.0",
+  "dependencies_used": ["langgraph"],
+  "optional_dependencies": {
+    "sidecar": ">=0.5  # JupyterLab 우측 영역 패널. BSD-3-Clause. 없으면 셀 인라인으로 폴백",
+    "ipywidgets": ">=7  # 사이드바 챗 UI 위젯",
+    "IPython": ">=8  # get_ipython().user_ns 로 노트북 변수 인식 + 인라인 렌더"
+  },
+  "stack_notes": {
+    "target_python": "3.11",
+    "tested_with_langgraph": "1.2.2 (StateGraph/MemorySaver API 는 1.0.10 과 호환)",
+    "llm_connection": "표준 라이브러리 urllib.request 로 로컬 OpenAI 호환 서버 호출 (openai SDK/requests/httpx 미사용 — 폐쇄망 차단 패키지 회피)"
+  },
+  "extracted_features": [
+    "LangGraph 2-노드 그래프(inspect → chat) + MemorySaver 멀티턴 (thread_id 기반)",
+    "노트북 변수 인식: get_ipython().user_ns 를 읽어 매 턴 system 컨텍스트로 주입 (모듈/함수/클래스/내부변수 자동 제외)",
+    "프라이버시 기본값: include_values=False 면 이름/타입/shape 만 LLM 에 전달 (값 미포함) — 금융 데이터 유출 방지",
+    "sidecar 위젯으로 JupyterLab 우측 사이드바에 챗봇 패널 (sidecar 없으면 셀 인라인 폴백)",
+    "사이드바 변수 패널 + '새로고침' 으로 챗봇이 보는 변수를 사용자가 실시간 확인 (투명성)",
+    "LocalOpenAILLM: 표준 라이브러리 urllib 만으로 로컬 OpenAI 호환 서버(vLLM/Ollama/llama.cpp) 연결, 프록시 우회",
+    "MockLLM: 서버 없이도 변수 인식 동작을 즉시 시연 (system 변수 블록을 그대로 인식해 응답)",
+    "대화 기록 self-contained HTML export (data URL 다운로드 + 파일 저장) — 바이너리 영속화 없음"
+  ],
+  "limitations": [
+    "MockLLM 은 실제 언어모델이 아닌 에코-스타일 데모입니다. LocalOpenAILLM 으로 사내 추론 서버를 연결해야 의미 있는 답변이 나옵니다.",
+    "sidecar 와 ipywidgets 는 폐쇄망 기본 스택(default.yaml)의 allowed_packages 에 아직 없습니다. 사내 미러 등록 여부를 확인하세요. 미설치 시 사이드바는 셀 인라인으로 폴백하지만, ipywidgets 자체가 없으면 UI 대신 chat()/export_html() 프로그래매틱 사용만 가능합니다.",
+    "001 의 Human-in-the-loop(ask_user/interrupt) 와 LangSmith 스타일 트레이서는 이 변환물에 포함하지 않았습니다 (사이드바 + 변수 인식 + 로컬 LLM 연결에 집중). 필요하면 001 을 참고/병행하세요.",
+    "변수 인식은 'tool 호출' 이 아니라 'system 컨텍스트 주입' 방식입니다. 로컬 모델의 tool-calling 신뢰도에 의존하지 않아 안정적이지만, 변수 '값' 전체를 동적으로 조회하지는 않습니다 (요약/짧은 미리보기까지).",
+    "변수가 매우 많으면 max_vars(기본 40) 로 잘립니다. 프롬프트 폭주 방지를 위한 의도된 상한입니다.",
+    "노트북 프로세스를 재시작하면 MemorySaver 대화 이력이 사라집니다. 반출이 필요하면 export_html 로 HTML 스냅샷을 남기세요."
+  ]
+}

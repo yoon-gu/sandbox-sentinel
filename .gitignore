@@ -235,6 +235,10 @@ $RECYCLE.BIN/
 # chat_ui() 의 [트레이스 저장 & 링크] 버튼이 생성하는 파일
 trace_*.html
 
+# 007 sidebar_chat 의 대화 내보내기 산출물
+chat_*.html
+conversation.html
+
 # Claude worktrees / 스케줄러 (transient)
 .claude/worktrees/
 .claude/scheduled_tasks.lock
