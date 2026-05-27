@@ -10,7 +10,7 @@
 import { Message } from '@lumino/messaging';
 import { Widget } from '@lumino/widgets';
 
-import { createThread, runWait } from './handler';
+import { requestBrain } from './handler';
 
 interface ChatMessage {
   role: string; // 'user' | 'assistant' | 'error'
@@ -19,7 +19,7 @@ interface ChatMessage {
 
 /** 챗봇 사이드바 위젯. */
 export class ChatWidget extends Widget {
-  private _threadId: string | null = null;
+  private _sessionId: string;
   private _messagesNode: HTMLDivElement;
   private _input: HTMLTextAreaElement;
   private _sendButton: HTMLElement;
@@ -29,7 +29,8 @@ export class ChatWidget extends Widget {
     super();
     this.addClass('jp-ChatWidget');
 
-    // 대화 thread 는 첫 전송(또는 '새 대화') 시 LangGraph 서버에 생성합니다.
+    // 위젯마다 고유 세션 id — 서버가 대화 맥락을 이 키로 구분합니다.
+    this._sessionId = `jlsc-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 
     // ── 헤더: 제목 + 새 대화 버튼 ──
     const header = document.createElement('div');
@@ -71,10 +72,10 @@ export class ChatWidget extends Widget {
     this.node.appendChild(this._messagesNode);
     this.node.appendChild(inputRow);
 
-    // 외부 모델 없이도 동작함을 알리는 첫 인사(로컬에서만 추가, 서버 호출 아님).
+    // 첫 인사(로컬에서만 추가, 서버 호출 아님).
     this._appendMessage({
       role: 'assistant',
-      content: '안녕하세요! 무엇이든 입력해 보세요. (LangGraph · deepagents 로 동작)'
+      content: '안녕하세요! 무엇이든 입력해 보세요. (deepagents·langgraph + Claude)'
     });
   }
 
@@ -144,12 +145,12 @@ export class ChatWidget extends Widget {
     pending.classList.add('jp-mod-pending');
 
     try {
-      if (!this._threadId) {
-        this._threadId = await createThread();   // 첫 전송 시 thread 생성
-      }
-      const reply = await runWait(this._threadId, text);
+      const reply = await requestBrain<ChatMessage>('chat', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: this._sessionId, message: text })
+      });
       pending.classList.remove('jp-mod-pending');
-      pending.innerText = reply;
+      pending.innerText = reply.content;
     } catch (error) {
       pending.classList.remove('jp-mod-pending', 'jp-mod-assistant');
       pending.classList.add('jp-mod-error');
@@ -162,9 +163,16 @@ export class ChatWidget extends Widget {
     }
   }
 
-  /** 새 대화 = 새 thread. thread 를 비워 다음 전송 시 새로 생성되게 합니다. */
+  /** 서버 세션을 초기화하고 화면을 비웁니다. */
   private async _resetChat(): Promise<void> {
-    this._threadId = null;
+    try {
+      await requestBrain<{ ok: boolean }>('reset', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: this._sessionId })
+      });
+    } catch (error) {
+      console.error('reset 실패:', error);
+    }
     this._messagesNode.innerHTML = '';
     this._appendMessage({
       role: 'assistant',

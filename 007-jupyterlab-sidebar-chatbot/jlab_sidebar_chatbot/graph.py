@@ -50,24 +50,6 @@ def build_chat_graph(
     )
 
 
-def make_graph():
-    """LangGraph Server(`langgraph dev`) 용 그래프 팩토리.
-
-    langgraph.json 의 graphs 항목이 이 함수를 가리킵니다. LangGraph 플랫폼이 thread
-    영속화(체크포인터)를 직접 제공하므로, 여기서는 **체크포인터 없이** 컴파일합니다.
-    (멀티턴은 플랫폼의 thread 가 관리 — 프론트는 thread_id 로 run 을 호출.)
-    """
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise RuntimeError("ANTHROPIC_API_KEY 환경변수가 필요합니다.")
-    from deepagents import create_deep_agent
-    from langchain_anthropic import ChatAnthropic
-
-    return create_deep_agent(
-        model=ChatAnthropic(model=DEFAULT_MODEL, temperature=0),
-        system_prompt=DEFAULT_SYSTEM_PROMPT,
-    )
-
-
 def reply(graph, thread_id: str, message: str) -> str:
     """그래프를 thread_id 로 한 턴 호출하고 마지막 assistant 텍스트를 돌려줍니다.
 
