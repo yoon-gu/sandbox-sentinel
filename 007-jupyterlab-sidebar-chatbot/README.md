@@ -83,14 +83,21 @@ pip wheel . -w dist      # 폐쇄망 반입용 .whl 생성
 
 ### 3) 설치 & 사용 — **jupyter 서버 재시작 없이**
 
-폐쇄망(이미 jupyter 가 떠 있고 내가 끌 수 없는 환경)에서:
+폐쇄망(이미 jupyter 가 떠 있고 내가 끌 수 없는 환경)에서. **터미널을 못 여는 환경이면 1) 을 노트북 셀에서 하면 됩니다.**
+
+**1) 프론트 labextension 설치** — 아래 둘 중 하나 (둘 다 jupyter 가 쓰는 env 에 설치):
 
 ```bash
-# 1) 프론트 labextension 설치 (jupyter 가 쓰는 env 에)
+# (a) 터미널에서
 pip install jlab_sidebar_chatbot-*.whl      # 또는 dev: pip install -e .
-
-# 2) 브라우저에서 JupyterLab 페이지 새로고침 → 우측에 💬 탭 등장 (서버 재시작 X)
 ```
+
+```python
+# (b) 터미널 없이, 노트북 셀에서 — %pip 매직이 현재 커널/서버 env 에 설치
+%pip install jlab_sidebar_chatbot-0.1.0-py3-none-any.whl
+```
+
+**2) 브라우저에서 JupyterLab 페이지 새로고침** → 우측에 💬 탭 등장 (서버 재시작 X).
 
 그다음 **노트북 셀에서 두뇌 서버를 한 줄로** 띄웁니다(커널은 내가 자유롭게 실행 가능):
 
