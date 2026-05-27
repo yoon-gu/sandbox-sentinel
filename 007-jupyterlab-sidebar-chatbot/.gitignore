@@ -1,0 +1,9 @@
+# 빌드 산출물 / 의존성 (반입 대상은 빌드된 wheel 이며, 이 캐시들은 리포에 두지 않습니다)
+node_modules/
+lib/
+tsconfig.tsbuildinfo
+jlab_sidebar_chatbot/labextension/
+*.egg-info/
+.yarn/
+.pnp.*
+yarn.lock
