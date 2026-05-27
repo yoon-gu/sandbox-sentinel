@@ -24,8 +24,12 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11"
 ]
-# 런타임 의존성 없음 — 두뇌/셀 서버는 표준 라이브러리만 사용합니다.
-dependencies = []
+# 두뇌 = deepagents(langgraph) + Claude. ⚠️ 온라인/개발 전용(외부망 + httpx 계열).
+# 폐쇄망에서는 이 의존성을 사내 LLM 스택으로 바꿔서 빌드하세요.
+dependencies = [
+  "deepagents>=0.4.5",
+  "langchain-anthropic>=0.1.0",
+]
 dynamic = ["version"]
 
 [tool.hatch.version]
