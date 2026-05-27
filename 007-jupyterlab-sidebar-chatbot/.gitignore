@@ -8,3 +8,4 @@ jlab_sidebar_chatbot/labextension/
 .pnp.*
 yarn.lock
 dist/
+.langgraph_api/
