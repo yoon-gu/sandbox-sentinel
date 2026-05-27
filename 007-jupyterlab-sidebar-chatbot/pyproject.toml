@@ -39,6 +39,9 @@ path = "jlab_sidebar_chatbot/_version.py"
 artifacts = ["jlab_sidebar_chatbot/labextension"]
 exclude = [".github", "node_modules", "lib", "demo.ipynb"]
 
+[tool.hatch.build.targets.wheel]
+exclude = ["**/.ipynb_checkpoints", "**/__pycache__"]
+
 [tool.hatch.build.targets.wheel.shared-data]
 "jlab_sidebar_chatbot/labextension" = "share/jupyter/labextensions/jlab-sidebar-chatbot"
 "install.json" = "share/jupyter/labextensions/jlab-sidebar-chatbot/install.json"
