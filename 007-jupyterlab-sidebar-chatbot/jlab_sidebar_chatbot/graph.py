@@ -1,14 +1,15 @@
 """
 챗봇 두뇌 = langgraph 그래프 (deepagents 로 생성) + InMemorySaver 체크포인터.
 
-커스텀 LLM 추상화(Adapter/Mock/Brain) 없이, deepagents 가 만드는 langgraph
-CompiledStateGraph 하나가 두뇌입니다. 멀티턴은 langgraph 체크포인터(thread_id)가
-관리하므로, 매 턴 '새 user 메시지 하나'만 그래프에 전달하면 됩니다.
-
-⚠️ 온라인/개발 전용
-   - Claude API(api.anthropic.com) 호출 + anthropic/langchain-anthropic(httpx 기반)
-     → 폐쇄망 네트워크/패키지 정책과 충돌. 로컬 개발/데모에서만 사용하세요.
-   - API 키는 환경변수 ANTHROPIC_API_KEY 로만 읽습니다(코드/노트북에 하드코딩 금지).
+⚠️ 온라인/개발 전용 (모델은 OpenAI 호환 엔드포인트로 통신)
+   - 실 OpenAI 또는 사내 vLLM/Ollama 등 **OpenAI 호환 REST**(/v1) 에 붙습니다.
+     사내 vLLM 으로 가면 내부 네트워크라 외부망 호출은 아니지만, langchain-openai/openai
+     (httpx 기반)는 폐쇄망 패키지 정책 확인이 필요합니다.
+   - 환경변수만 바꾸면 dev ↔ 운영 그대로:
+       OPENAI_API_KEY   : 필수
+       OPENAI_BASE_URL  : 선택. 비우면 실 OpenAI, 사내 vLLM 이면 https://<host>/v1
+       OPENAI_MODEL     : 선택. 기본 gpt-4o-mini, vLLM 이면 served-model-name.
+   - 키는 코드/노트북에 하드코딩하지 말고 셸/jupyter env 로 주입하세요.
 """
 
 from __future__ import annotations
@@ -16,34 +17,55 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-# 키가 접근 가능한 현행 Claude 모델. 필요시 ANTHROPIC_MODEL 로 덮어쓰기.
-DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+# 모델·엔드포인트는 환경변수로 — 사내 vLLM 운영 전환은 OPENAI_BASE_URL/MODEL 만 바꾸면 끝.
+DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 DEFAULT_SYSTEM_PROMPT = (
     "너는 폐쇄망 Jupyter 환경에서 동작하는 친절한 도우미야. 한국어로 간결하게 답해."
 )
 
 
 def build_chat_graph(
-    model: str = DEFAULT_MODEL,
+    model: Optional[str] = None,
     system_prompt: Optional[str] = None,
     tools=None,
     checkpointer=None,
+    *,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
 ):
     """deepagents 로 langgraph 챗 그래프를 만들어 CompiledStateGraph 를 반환합니다.
 
-    멀티턴은 checkpointer(기본 InMemorySaver)와 호출 시 thread_id 로 관리됩니다.
+    모델은 OpenAI 호환 엔드포인트(실 OpenAI / 사내 vLLM / 로컬 Ollama 등)에 붙습니다.
+
+    파라미터 우선순위 (인자가 있으면 인자, 없으면 env):
+        api_key   : 인자 > OPENAI_API_KEY  env  (없으면 RuntimeError)
+        base_url  : 인자 > OPENAI_BASE_URL env  (없으면 OpenAI 기본 엔드포인트)
+        model     : 인자 > OPENAI_MODEL    env  (없으면 "gpt-4o-mini")
+
+    사내 vLLM 예시:
+        build_chat_graph(api_key="...", base_url="https://vllm.사내/v1", model="<served-name>")
+
+    멀티턴은 checkpointer(기본 InMemorySaver) + 호출 시 thread_id 로 관리됩니다.
     """
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    api_key = api_key or os.environ.get("OPENAI_API_KEY")
+    base_url = base_url or os.environ.get("OPENAI_BASE_URL") or None
+    model = model or os.environ.get("OPENAI_MODEL") or "gpt-4o-mini"
+    if not api_key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY 환경변수가 필요합니다. 코드/노트북에 키를 직접 넣지 말고 "
-            "셸 또는 jupyter 서버 env 로 주입하세요(커널이 상속받습니다)."
+            "OPENAI_API_KEY 가 필요합니다. 인자(api_key=...) 또는 환경변수(OPENAI_API_KEY) 로 "
+            "주입하세요. 코드/노트북에 키를 하드코딩하지 마세요."
         )
     from deepagents import create_deep_agent
-    from langchain_anthropic import ChatAnthropic
+    from langchain_openai import ChatOpenAI
     from langgraph.checkpoint.memory import InMemorySaver
 
     return create_deep_agent(
-        model=ChatAnthropic(model=model, temperature=0),
+        model=ChatOpenAI(
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            temperature=0,
+        ),
         system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
         tools=list(tools) if tools else None,
         checkpointer=checkpointer or InMemorySaver(),
@@ -111,7 +133,7 @@ def reply(graph, thread_id: str, message: str) -> str:
 
 # ===== Example Usage =====
 if __name__ == "__main__":
-    # ANTHROPIC_API_KEY 가 env 에 있어야 동작합니다.
+    # OPENAI_API_KEY 가 env 에 있어야 동작 (vLLM 이면 OPENAI_BASE_URL 도).
     g = build_chat_graph()
     tid = "demo-thread"
     for line in ["내 이름은 윤구야.", "내 이름이 뭐였지?"]:

@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jlab_sidebar_chatbot"
-description = "JupyterLab 우측 사이드바 챗봇 (Mock LLM + 교체 가능한 어댑터)"
+description = "JupyterLab 우측 사이드바 챗봇 (deepagents/langgraph + OpenAI 호환 모델 — 실 OpenAI / 사내 vLLM)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "BSD-3-Clause" }
@@ -25,7 +25,8 @@ classifiers = [
   "Programming Language :: Python :: 3.11"
 ]
 # 런타임 의존성 없음 — wheel 은 코드만 담습니다. 폐쇄망에서 사용자가 직접 설치하세요:
-#   pip install deepagents "langgraph-cli[inmem]" <선택한 모델 라이브러리(예: langchain-anthropic)>
+#   pip install deepagents langchain-openai langchain-anthropic
+#   (langchain-anthropic 은 deepagents 0.4.x 가 import 시점에 참조 — OpenAI 호환만 써도 필요)
 dependencies = []
 dynamic = ["version"]
 

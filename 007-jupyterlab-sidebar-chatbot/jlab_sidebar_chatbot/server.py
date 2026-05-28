@@ -10,10 +10,19 @@ langgraph 그래프를 localhost HTTP 로 서빙하는 얕은 전송 계층.
     POST  /reset   {session_id}          -> {ok: true}   (해당 세션 thread 를 새로 분기)
     GET   /health                         -> {ok: true}
 
-⚠️ 온라인/개발 전용 (graph.py 가 Claude API 사용). 브라우저 127.0.0.1 == 커널 127.0.0.1 전제.
+⚠️ 온라인/개발 전용 (graph.py 가 OpenAI 호환 모델 호출). 브라우저 127.0.0.1 == 커널 127.0.0.1 전제.
 사용 (노트북 셀):
     from jlab_sidebar_chatbot import start_graph_server
-    start_graph_server()      # ANTHROPIC_API_KEY env 필요 (셀에 키 적지 마세요)
+
+    # 가장 단순 — 환경변수에서 OPENAI_API_KEY/_BASE_URL/_MODEL 을 읽음
+    start_graph_server()
+
+    # 사내 vLLM 을 한 줄로 — 인자가 env 보다 우선
+    start_graph_server(
+        api_key="<사내 vLLM 키>",
+        base_url="https://<사내 vllm host>/v1",
+        model="<served-model-name>",
+    )
 """
 
 from __future__ import annotations
@@ -116,12 +125,24 @@ def start_graph_server(
     port: int = DEFAULT_PORT,
     graph=None,
     host: str = "127.0.0.1",
+    *,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    model: Optional[str] = None,
+    system_prompt: Optional[str] = None,
     **graph_kwargs,
 ) -> Optional[ThreadingHTTPServer]:
     """노트북 셀에서 호출 — langgraph 그래프를 백그라운드 스레드로 서빙합니다.
 
-    graph 를 주지 않으면 build_chat_graph(**graph_kwargs) 로 기본 그래프(deepagents+Claude)를
-    만듭니다(ANTHROPIC_API_KEY env 필요). 포트 충돌은 우아하게 처리합니다.
+    두 가지 방식:
+      1) graph 를 직접 만들어서 넘기기 — `start_graph_server(graph=my_graph)`
+      2) (편의) api_key/base_url/model/system_prompt 를 인자로 주거나, 환경변수
+         (OPENAI_API_KEY/_BASE_URL/_MODEL) 로 주입 → 내부에서 build_chat_graph 호출
+
+    사내 vLLM 한 줄 예시:
+        start_graph_server(api_key="...", base_url="https://vllm.사내/v1", model="<name>")
+
+    포트가 이미 우리 서버면 그대로 두고 알림, 다른 프로세스가 쓰면 우아하게 실패합니다.
     """
     if port in _servers:
         print(f"이미 이 커널에서 실행 중입니다: http://{host}:{port}")
@@ -133,7 +154,13 @@ def start_graph_server(
         )
         return None
 
-    graph = graph or build_chat_graph(**graph_kwargs)
+    graph = graph or build_chat_graph(
+        model=model,
+        system_prompt=system_prompt,
+        api_key=api_key,
+        base_url=base_url,
+        **graph_kwargs,
+    )
     try:
         httpd = ThreadingHTTPServer((host, port), _make_handler(graph))
     except OSError as exc:
@@ -162,7 +189,7 @@ def stop_graph_server(port: int = DEFAULT_PORT) -> None:
 
 # ===== Example Usage =====
 if __name__ == "__main__":
-    # ANTHROPIC_API_KEY 가 env 에 있어야 동작. 포그라운드로 띄워 Ctrl+C 까지.
+    # OPENAI_API_KEY 가 env 에 있어야 동작 (사내 vLLM 이면 OPENAI_BASE_URL 도). 포그라운드.
     _graph = build_chat_graph()
     _httpd = ThreadingHTTPServer(("127.0.0.1", DEFAULT_PORT), _make_handler(_graph))
     print(f"http://127.0.0.1:{DEFAULT_PORT} 에서 동작 중 (Ctrl+C 로 종료)")

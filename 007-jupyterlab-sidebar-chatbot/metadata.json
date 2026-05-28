@@ -3,7 +3,7 @@
   "name": "jupyterlab-sidebar-chatbot",
   "source": {
     "library": "jupyterlab/extension-examples 의 shout-button-message (우측 사이드바 Widget UI 패턴) + deepagents/langgraph (두뇌)",
-    "version": "JupyterLab 4.5.x / deepagents 0.4.5 / langgraph 1.2.x",
+    "version": "JupyterLab 4.5.x / deepagents 0.4.5 / langgraph 1.2.x / langchain-openai",
     "url": "https://github.com/jupyterlab/extension-examples/tree/main/shout-button-message",
     "license": "BSD-3-Clause",
     "commit_sha": "N/A (예제 UI 패턴 참고, 코드는 자체 작성)"
@@ -14,35 +14,39 @@
   "dependencies_used": [
     "deepagents (0.4.5)  # create_deep_agent → langgraph CompiledStateGraph",
     "langgraph (>=1.0.8, 작업 시 1.2.2)  # 그래프 런타임 + InMemorySaver 체크포인터",
-    "langchain, langchain-anthropic  # ChatAnthropic(Claude) 모델",
-    "anthropic  # ⚠️ httpx 기반(외부망) — 폐쇄망 차단 패키지",
+    "langchain-openai (→openai/httpx)  # ChatOpenAI — OpenAI 호환 (실 OpenAI / 사내 vLLM / Ollama)",
+    "langchain-anthropic  # deepagents 0.4.x 가 import 시점에 무조건 참조 — 설치만 필요(사용 안 함)",
     "표준 라이브러리 http.server  # 얕은 HTTP 전송(server.py)",
-    "@jupyterlab/application, ui-components / @lumino/widgets, messaging (^4/^2)  # 프론트(빌드시)"
+    "@jupyterlab/application, rendermime, ui-components / @lumino/widgets, messaging (^4/^2)  # 프론트(빌드시)"
   ],
   "extracted_features": [
     "shout-button-message 예제 패턴: Widget 상속 + 생성자 DOM + onAfterAttach/onBeforeDetach 라이프사이클 (예제의 bind 중복 해제 버그는 arrow 필드로 교정)",
     "우측 사이드바 탭으로 도킹되는 챗봇 위젯 (app.shell.add(widget, 'right'))",
     "두뇌 = deepagents 가 만든 langgraph 그래프 하나. 직접 만든 LLMAdapter/Mock/ChatBrain 클래스 제거 — langgraph 세계관으로 통일",
+    "모델은 ChatOpenAI 로 OpenAI 호환 엔드포인트(실 OpenAI / 사내 vLLM / 로컬 Ollama) 에 붙음. base_url/api_key/model 은 인자 또는 env(OPENAI_API_KEY/_BASE_URL/_MODEL) — 환경 전환 시 코드 변경 0",
+    "start_graph_server(api_key=, base_url=, model=, system_prompt=) 로 셀 한 줄에 사내 vLLM 으로 띄울 수 있음(인자가 env 보다 우선)",
     "멀티턴 = langgraph InMemorySaver + thread_id(=세션). 매 턴 새 메시지만 전달, 그래프가 기록 복원. /reset 은 thread 분기로 초기화",
+    "응답 마크다운 렌더 (JupyterLab IRenderMimeRegistry) + 도구·중간 단계는 기본 접힌 <details>(클릭 펼침)",
     "서빙 = 노트북 셀에서 띄우는 stdlib http.server(얕은 전송, /chat·/reset·/health) — start_graph_server()",
-    "모델/시스템 프롬프트/도구 교체 = build_chat_graph(model=, system_prompt=, tools=) 후 start_graph_server(graph=)",
     "jupyter 서버 재시작 불필요: 프론트는 설치+새로고침, 두뇌는 커널 셀 서버. 노트북 셀에서 %pip install(설치) ~ stop_graph_server()+pip uninstall(정리)까지 완결"
   ],
   "limitations": [
-    "온라인/개발 전용: Claude API(외부 네트워크) + anthropic/langchain-anthropic(httpx) 사용. 폐쇄망 네트워크/패키지 정책과 충돌 — 폐쇄망 배포용 아님. 사내 LLM 으로 쓰려면 graph.py 의 ChatAnthropic 를 사내 엔드포인트용 langchain 챗모델로 교체 필요.",
-    "API 키 필수: ANTHROPIC_API_KEY 환경변수로만 주입(코드/노트북 하드코딩 금지).",
+    "온라인/개발 전용: OpenAI 호환 REST(실 OpenAI=외부망, 사내 vLLM=내부망) + openai/langchain-openai(httpx) 사용. 어느 쪽이든 폐쇄망 패키지 정책 확인 필요.",
+    "API 키 필수: 인자(api_key=...) 또는 환경변수(OPENAI_API_KEY) 로 주입(코드/노트북 하드코딩 금지). 사내 vLLM 이면 OPENAI_BASE_URL/MODEL 도.",
+    "tool calling 지원 모델 필요: deepagents 가 write_todos/write_file 등 도구를 부르기 때문에, 사내 vLLM 이면 모델이 OpenAI 호환 tool-call 포맷을 제대로 출력해야 단계가 정상(예: Llama-3.1-instruct, Qwen-함수콜링 템플릿). 안 되면 답변만 오고 steps 가 비어 보임.",
+    "wheel 무의존성: deepagents·langchain-openai·langchain-anthropic 세 패키지를 직접 설치해야 동작 (langchain-anthropic 은 deepagents 0.4.x 가 모듈 로드 시 무조건 import).",
     "localhost 전제: 브라우저 127.0.0.1 == 커널 기계(로컬/컨테이너/포트포워딩). 원격 호스트명 접속 시 미동작.",
     "매 커널 세션마다 start_graph_server() 한 줄 실행 필요. 포트 기본 8765 (server.py / handler.ts 상수 일치).",
     "single-file 아님: 다수 파일 + npm 빌드. 반입 단위는 wheel(.whl).",
     "대화 기록은 InMemorySaver(메모리) 한정 — 커널 재시작/stop/reset 시 소실.",
     "langgraph 를 1.2.2 로 올림(deepagents 0.4.5 호환). 리포 기본 스택 핀(1.0.10)과 달라 공유 .venv 의 다른 변환물(001/003/004)에 영향 가능.",
-    "JupyterLab 4 전용. 스트리밍/마크다운 렌더는 범위 외."
+    "JupyterLab 4 전용. 스트리밍 응답은 범위 외."
   ],
   "build": {
     "frontend": "jlpm install && jlpm run build:prod",
-    "wheel": "pip wheel . -w dist",
+    "wheel": "pip wheel . -w dist --no-deps",
     "install": "pip install jlab_sidebar_chatbot-*.whl  (또는 노트북 %pip install dist/*.whl)",
-    "use": "브라우저 새로고침 → 💬 탭 / 노트북: from jlab_sidebar_chatbot import start_graph_server; start_graph_server() (ANTHROPIC_API_KEY env 필요)",
-    "verified_2026-05-28": "langgraph InMemorySaver 멀티턴(thread_id) + /reset 초기화 확인. 실제 jupyter lab 우측 탭에서 Claude(deepagents) 응답 확인."
+    "use": "브라우저 새로고침 → 💬 탭 / 노트북: start_graph_server() (env) 또는 start_graph_server(api_key=, base_url=, model=) (사내 vLLM 한 줄)",
+    "verified_2026-05-28": "ChatOpenAI 로 build_chat_graph 구성 확인(인자/env 우선순위, RuntimeError 메시지). 실 endpoint 호출 검증은 사용자 환경에서."
   }
 }

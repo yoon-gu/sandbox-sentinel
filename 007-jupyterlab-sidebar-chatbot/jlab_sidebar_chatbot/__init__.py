@@ -8,8 +8,8 @@ jlab_sidebar_chatbot — JupyterLab 우측 사이드바 챗봇
      → 노트북 셀에서 start_graph_server() 로 localhost 에 서빙. 직접 만든 LLM
         추상화(Adapter/Mock/Brain)는 없고, langgraph 그래프 하나가 두뇌입니다.
 
-⚠️ 두뇌는 Claude API 를 쓰는 '온라인/개발 전용'입니다(폐쇄망 배포용 아님).
-   API 키는 환경변수 ANTHROPIC_API_KEY 로만 읽습니다.
+⚠️ 두뇌는 OpenAI 호환 모델(실 OpenAI / 사내 vLLM / 로컬 Ollama 등)을 쓰는 '온라인/개발 전용'.
+   환경변수: OPENAI_API_KEY (필수) · OPENAI_BASE_URL (사내 vLLM /v1) · OPENAI_MODEL.
 
 생성: Code Conversion Agent
 라이선스: BSD-3-Clause
