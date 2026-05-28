@@ -135,17 +135,169 @@
   cursor: not-allowed;
 }
 
-/* ── 마크다운 렌더(최종 답변) — 말풍선 안 여백 정리 ── */
-.jp-ChatWidget-markdown :first-child {
-  margin-top: 0;
+/* ── 마크다운 렌더(최종 답변) — markdown-it 자체 렌더 결과를 챗에 맞게 컴팩트하게 ──
+   JupyterLab 의 jp-RenderedHTMLCommon CSS 는 더 이상 사용 안 함(rendermime 미의존).
+   .jp-ChatWidget-markdown 스코프 안에서만 룰 적용 → 다른 곳 렌더에 영향 0. */
+.jp-ChatWidget-markdown {
+  font-size: var(--jp-ui-font-size1);
+  line-height: 1.45;
+  color: var(--jp-ui-font-color1);
 }
-.jp-ChatWidget-markdown :last-child {
-  margin-bottom: 0;
+.jp-ChatWidget-markdown :first-child { margin-top: 0; }
+.jp-ChatWidget-markdown :last-child { margin-bottom: 0; }
+
+.jp-ChatWidget-markdown p { margin: 0 0 6px; }
+.jp-ChatWidget-markdown ul,
+.jp-ChatWidget-markdown ol { margin: 4px 0 6px; padding-left: 1.4em; }
+.jp-ChatWidget-markdown li { margin: 1px 0; }
+.jp-ChatWidget-markdown li > p { margin: 0; }
+.jp-ChatWidget-markdown li > ul,
+.jp-ChatWidget-markdown li > ol { margin: 2px 0; }
+
+.jp-ChatWidget-markdown h1,
+.jp-ChatWidget-markdown h2,
+.jp-ChatWidget-markdown h3,
+.jp-ChatWidget-markdown h4,
+.jp-ChatWidget-markdown h5,
+.jp-ChatWidget-markdown h6 {
+  margin: 8px 0 4px;
+  line-height: 1.3;
+  font-weight: 600;
 }
-.jp-ChatWidget-markdown pre,
+.jp-ChatWidget-markdown h1 { font-size: 1.15em; }
+.jp-ChatWidget-markdown h2 { font-size: 1.10em; }
+.jp-ChatWidget-markdown h3 { font-size: 1.05em; }
+.jp-ChatWidget-markdown h4,
+.jp-ChatWidget-markdown h5,
+.jp-ChatWidget-markdown h6 { font-size: 1em; }
+
 .jp-ChatWidget-markdown code {
+  font-size: 0.9em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--jp-layout-color3, rgba(127, 127, 127, 0.12));
+  word-break: break-word;
+}
+.jp-ChatWidget-markdown pre {
+  margin: 4px 0;
+  padding: 6px 8px;
+  font-size: 0.88em;
+  line-height: 1.4;
+  background: var(--jp-layout-color0);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.jp-ChatWidget-markdown pre code {
+  padding: 0;
+  background: transparent;
+  font-size: inherit;
+}
+
+.jp-ChatWidget-markdown blockquote {
+  margin: 4px 0;
+  padding: 0 0 0 8px;
+  border-left: 3px solid var(--jp-border-color2);
+  color: var(--jp-ui-font-color2);
+}
+.jp-ChatWidget-markdown hr { margin: 6px 0; border: 0; border-top: 1px solid var(--jp-border-color2); }
+.jp-ChatWidget-markdown table {
+  margin: 4px 0;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+.jp-ChatWidget-markdown th,
+.jp-ChatWidget-markdown td {
+  padding: 3px 6px;
+  border: 1px solid var(--jp-border-color2);
+}
+.jp-ChatWidget-markdown a { color: var(--jp-brand-color1); text-decoration: none; }
+.jp-ChatWidget-markdown a:hover { text-decoration: underline; }
+
+/* assistant 말풍선은 마크다운이 HTML 로 렌더되므로 pre-wrap 불필요(이중 줄바꿈 방지). */
+.jp-ChatWidget-bubble.jp-mod-assistant { white-space: normal; }
+
+/* ── 코드블록 (highlight.js + 복사 버튼) ──
+   hljs 의 토큰 색을 JupyterLab CSS 변수(--jp-mirror-editor-*)에 매핑 →
+   라이트/다크 테마에 자동 적응. 별도 hljs 테마 CSS 를 import 하지 않습니다. */
+.jp-ChatWidget-markdown pre.hljs {
+  position: relative;
+}
+.jp-ChatWidget-markdown code.hljs {
+  display: block;
+  background: transparent;
+  padding: 0;
+  font-family: var(--jp-code-font-family, monospace);
+}
+.jp-ChatWidget-markdown .hljs-comment,
+.jp-ChatWidget-markdown .hljs-quote {
+  color: var(--jp-mirror-editor-comment-color, #75715e);
+  font-style: italic;
+}
+.jp-ChatWidget-markdown .hljs-keyword,
+.jp-ChatWidget-markdown .hljs-selector-tag,
+.jp-ChatWidget-markdown .hljs-built_in,
+.jp-ChatWidget-markdown .hljs-section {
+  color: var(--jp-mirror-editor-keyword-color, #007020);
+  font-weight: 600;
+}
+.jp-ChatWidget-markdown .hljs-string,
+.jp-ChatWidget-markdown .hljs-doctag,
+.jp-ChatWidget-markdown .hljs-regexp,
+.jp-ChatWidget-markdown .hljs-template-tag,
+.jp-ChatWidget-markdown .hljs-template-variable {
+  color: var(--jp-mirror-editor-string-color, #4070a0);
+}
+.jp-ChatWidget-markdown .hljs-number,
+.jp-ChatWidget-markdown .hljs-literal,
+.jp-ChatWidget-markdown .hljs-symbol {
+  color: var(--jp-mirror-editor-number-color, #40a070);
+}
+.jp-ChatWidget-markdown .hljs-title,
+.jp-ChatWidget-markdown .hljs-name,
+.jp-ChatWidget-markdown .hljs-title.class_,
+.jp-ChatWidget-markdown .hljs-title.function_ {
+  color: var(--jp-mirror-editor-def-color, #06287e);
+  font-weight: 600;
+}
+.jp-ChatWidget-markdown .hljs-variable,
+.jp-ChatWidget-markdown .hljs-attr,
+.jp-ChatWidget-markdown .hljs-attribute,
+.jp-ChatWidget-markdown .hljs-property {
+  color: var(--jp-mirror-editor-variable-color, #19177c);
+}
+.jp-ChatWidget-markdown .hljs-meta,
+.jp-ChatWidget-markdown .hljs-tag {
+  color: var(--jp-mirror-editor-meta-color, #555555);
+}
+.jp-ChatWidget-markdown .hljs-emphasis { font-style: italic; }
+.jp-ChatWidget-markdown .hljs-strong { font-weight: 700; }
+
+/* 코드블록 우측 상단 "복사" 버튼 (chat UX) */
+.jp-ChatWidget-copyBtn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 2px 8px;
+  font-size: var(--jp-ui-font-size0);
+  font-family: var(--jp-ui-font-family);
+  cursor: pointer;
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color2);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.jp-ChatWidget-markdown pre:hover .jp-ChatWidget-copyBtn,
+.jp-ChatWidget-copyBtn:focus {
+  opacity: 1;
+}
+.jp-ChatWidget-copyBtn:hover {
+  background: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color1);
 }
 
 /* ── 도구·중간 단계 (기본 접힘 <details>) ── */

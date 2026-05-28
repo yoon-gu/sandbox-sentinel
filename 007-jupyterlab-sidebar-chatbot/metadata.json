@@ -17,7 +17,8 @@
     "langchain-openai (→openai/httpx)  # ChatOpenAI — OpenAI 호환 (실 OpenAI / 사내 vLLM / Ollama)",
     "langchain-anthropic  # deepagents 0.4.x 가 import 시점에 무조건 참조 — 설치만 필요(사용 안 함)",
     "표준 라이브러리 http.server  # 얕은 HTTP 전송(server.py)",
-    "@jupyterlab/application, rendermime, ui-components / @lumino/widgets, messaging (^4/^2)  # 프론트(빌드시)"
+    "@jupyterlab/application, ui-components / @lumino/widgets, messaging (^4/^2)  # 프론트(빌드시)",
+    "markdown-it 14 / highlight.js 11 (cherry-pick) / dompurify 3  # 프론트 마크다운 자체 렌더 + sanitize"
   ],
   "extracted_features": [
     "shout-button-message 예제 패턴: Widget 상속 + 생성자 DOM + onAfterAttach/onBeforeDetach 라이프사이클 (예제의 bind 중복 해제 버그는 arrow 필드로 교정)",
@@ -26,7 +27,9 @@
     "모델은 ChatOpenAI 로 OpenAI 호환 엔드포인트(실 OpenAI / 사내 vLLM / 로컬 Ollama) 에 붙음. base_url/api_key/model 은 인자 또는 env(OPENAI_API_KEY/_BASE_URL/_MODEL) — 환경 전환 시 코드 변경 0",
     "start_graph_server(api_key=, base_url=, model=, system_prompt=) 로 셀 한 줄에 사내 vLLM 으로 띄울 수 있음(인자가 env 보다 우선)",
     "멀티턴 = langgraph InMemorySaver + thread_id(=세션). 매 턴 새 메시지만 전달, 그래프가 기록 복원. /reset 은 thread 분기로 초기화",
-    "응답 마크다운 렌더 (JupyterLab IRenderMimeRegistry) + 도구·중간 단계는 기본 접힌 <details>(클릭 펼침)",
+    "응답 마크다운 자체 렌더 (markdown-it + highlight.js cherry-pick + DOMPurify) — JupyterLab jp-RenderedHTMLCommon 큰 여백 안 거치고 챗에 맞게 컴팩트. hljs 토큰 색은 --jp-mirror-editor-* 변수에 매핑해 라이트/다크 자동 적응",
+    "코드블록 hover 시 우측 상단 '복사' 버튼 (clipboard API + execCommand 폴백 — HTTP 폐쇄망 대응)",
+    "도구·중간 단계는 기본 접힌 <details>(클릭 펼침)",
     "서빙 = 노트북 셀에서 띄우는 stdlib http.server(얕은 전송, /chat·/reset·/health) — start_graph_server()",
     "jupyter 서버 재시작 불필요: 프론트는 설치+새로고침, 두뇌는 커널 셀 서버. 노트북 셀에서 %pip install(설치) ~ stop_graph_server()+pip uninstall(정리)까지 완결"
   ],

@@ -37,7 +37,7 @@
                                                                       → 실 OpenAI / 사내 vLLM
 ```
 
-- **프론트(`src/`)**: 답변은 JupyterLab 마크다운 렌더러로(sanitize), 도구·중간 단계는 기본 접힌 `<details>`(클릭 시 펼침).
+- **프론트(`src/`)**: 답변은 `markdown-it` + `highlight.js`(cherry-pick) 로 자체 렌더, `DOMPurify` 로 sanitize. 코드블록 hover 시 우측 상단에 "복사" 버튼. 도구·중간 단계는 기본 접힌 `<details>`(클릭 시 펼침).
 - **두뇌(`graph.py`)**: deepagents 그래프 + InMemorySaver. 모델은 `ChatOpenAI(base_url=env, api_key=env, model=env)` — env 만 바꾸면 OpenAI ↔ vLLM ↔ Ollama 동일 코드.
 - **서빙(`server.py`)**: 얕은 HTTP 전송(`/chat`·`/reset`·`/health`). `/chat` 응답은 `{answer, steps}`.
 
@@ -58,7 +58,8 @@
 
 ## 기능 요약
 - 우측 사이드바 탭(shout 예제 패턴), 채팅 UI(Enter 전송 · Shift+Enter 줄바꿈 · 새 대화).
-- **마크다운 답변 렌더** (JupyterLab `IRenderMimeRegistry`, sanitize).
+- **마크다운 답변 자체 렌더** (`markdown-it` + `highlight.js` cherry-pick + `DOMPurify` sanitize) — JupyterLab 의 `jp-RenderedHTMLCommon` 큰 여백 안 거치고 챗에 맞게 컴팩트하게.
+- **코드블록 복사 버튼** — hover 시 우측 상단에 등장, `clipboard` API + `execCommand` 폴백(HTTP 폐쇄망 대응).
 - **도구·중간 단계 접이식** — `{answer, steps}` 구조. 단계는 기본 접힘, 클릭 시 펼침.
 - **멀티턴** — langgraph `InMemorySaver` + `thread_id`(=세션). `새 대화` 는 thread 분기.
 - **모델·엔드포인트 교체** — 환경변수만 (`OPENAI_BASE_URL`/`OPENAI_API_KEY`/`OPENAI_MODEL`). 코드 변경 0.
@@ -75,7 +76,7 @@ pip install deepagents langchain-openai langchain-anthropic
 | 두뇌 | `deepagents` | langgraph 그래프(create_deep_agent) |
 | 모델 어댑터 | `langchain-openai`(→`openai`) | OpenAI 호환 — base_url 만 바꾸면 vLLM/Ollama |
 | 전이 import | `langchain-anthropic` | deepagents 0.4.x 가 모듈 로드 시 무조건 import (안 써도 필요) |
-| 프론트(번들됨) | `@jupyterlab/application`·`rendermime`·`ui-components`, `@lumino/widgets`·`messaging` | 빌드 시 |
+| 프론트(번들됨) | `@jupyterlab/application`·`ui-components`, `@lumino/widgets`·`messaging`, `markdown-it`·`highlight.js`(cherry-pick)·`dompurify` | 빌드 시. wheel 에 모두 번들됨 |
 
 ## 사용 예시
 

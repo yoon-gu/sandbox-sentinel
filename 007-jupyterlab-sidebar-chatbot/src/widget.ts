@@ -4,15 +4,74 @@
 //   - Widget 을 상속하고 생성자에서 DOM 을 구성
 //   - 이벤트 리스너는 onAfterAttach 에서 등록하고 onBeforeDetach 에서 해제
 //
-// 응답 렌더:
-//   - 최종 답변(answer)은 JupyterLab 마크다운 렌더러(IRenderMimeRegistry)로 렌더(sanitize 됨).
-//   - 도구/중간 단계(steps)는 <details> 로 기본 접힘, 클릭 시 펼침.
+// 마크다운 렌더링:
+//   - JupyterLab 의 jp-RenderedHTMLCommon CSS 를 안 거치고 markdown-it 으로 직접 렌더.
+//   - 코드블록은 highlight.js (필요한 언어만 cherry-pick) 로 토큰화 — 색은
+//     JupyterLab CSS 변수에 매핑(라이트/다크 자동 적응, style/base.css 참고).
+//   - LLM 출력의 raw HTML/이벤트 핸들러는 DOMPurify 로 sanitize.
+//   - 코드블록마다 우측 상단에 "복사" 버튼을 자동 부착(챗 UX).
+//
+// 도구·중간 단계(steps) 는 <details> 로 기본 접힘 — 클릭 시 펼침.
 
-import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { Message } from '@lumino/messaging';
 import { Widget } from '@lumino/widgets';
+import MarkdownIt from 'markdown-it';
+import DOMPurify from 'dompurify';
+import hljs from 'highlight.js/lib/core';
+import python from 'highlight.js/lib/languages/python';
+import javascript from 'highlight.js/lib/languages/javascript';
+import typescript from 'highlight.js/lib/languages/typescript';
+import sql from 'highlight.js/lib/languages/sql';
+import bash from 'highlight.js/lib/languages/bash';
+import json from 'highlight.js/lib/languages/json';
+import xml from 'highlight.js/lib/languages/xml';
+import css from 'highlight.js/lib/languages/css';
+import yaml from 'highlight.js/lib/languages/yaml';
+import markdown from 'highlight.js/lib/languages/markdown';
+import plaintext from 'highlight.js/lib/languages/plaintext';
 
 import { requestBrain } from './handler';
+
+// 폐쇄망에서 자주 쓰는 언어만 등록 — 번들 크기 절약(전체는 700KB+, 이건 ~25KB).
+hljs.registerLanguage('python', python);
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerLanguage('sql', sql);
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('shell', bash);
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('xml', xml);
+hljs.registerLanguage('html', xml);
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('yaml', yaml);
+hljs.registerLanguage('yml', yaml);
+hljs.registerLanguage('markdown', markdown);
+hljs.registerLanguage('md', markdown);
+hljs.registerLanguage('plaintext', plaintext);
+hljs.registerLanguage('text', plaintext);
+
+// 챗 전체에서 재사용하는 단일 markdown-it 인스턴스.
+//   - html:false   — LLM 출력의 raw HTML 무력화(추가 안전망, sanitize 도 별도로 함)
+//   - linkify:true — http://... 자동 링크
+//   - breaks:true  — 챗 관행대로 단일 \n 을 <br> 로
+//   - typographer:false — 스마트 따옴표 등은 코드 컨텍스트에서 거슬려 끔
+const md: MarkdownIt = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true,
+  typographer: false,
+  highlight: (str, lang) => {
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        const result = hljs.highlight(str, { language: lang, ignoreIllegals: true }).value;
+        return `<pre class="hljs"><code class="hljs language-${lang}">${result}</code></pre>`;
+      } catch {
+        /* 폴백으로 떨어짐 */
+      }
+    }
+    return `<pre class="hljs"><code class="hljs">${md.utils.escapeHtml(str)}</code></pre>`;
+  }
+});
 
 interface ChatMessage {
   role: string; // 'user' | 'assistant' | 'error'
@@ -34,16 +93,14 @@ interface ChatReply {
 
 /** 챗봇 사이드바 위젯. */
 export class ChatWidget extends Widget {
-  private _rendermime: IRenderMimeRegistry;
   private _sessionId: string;
   private _messagesNode: HTMLDivElement;
   private _input: HTMLTextAreaElement;
   private _sendButton: HTMLElement;
   private _newButton: HTMLElement;
 
-  constructor(rendermime: IRenderMimeRegistry) {
+  constructor() {
     super();
-    this._rendermime = rendermime;
     this.addClass('jp-ChatWidget');
 
     // 위젯마다 고유 세션 id — 서버가 대화 맥락(thread)을 이 키로 구분합니다.
@@ -92,7 +149,7 @@ export class ChatWidget extends Widget {
     // 첫 인사(로컬에서만 추가, 서버 호출 아님).
     this._appendMessage({
       role: 'assistant',
-      content: '안녕하세요! 무엇이든 입력해 보세요. (deepagents·langgraph + Claude)'
+      content: '안녕하세요! 무엇이든 입력해 보세요. (deepagents · langgraph + OpenAI 호환 모델)'
     });
   }
 
@@ -143,23 +200,75 @@ export class ChatWidget extends Widget {
     this._messagesNode.scrollTop = this._messagesNode.scrollHeight;
   }
 
-  /** 최종 답변을 JupyterLab 마크다운 렌더러로 host 에 렌더(sanitize 됨). */
-  private async _renderMarkdown(host: HTMLElement, markdown: string): Promise<void> {
+  /** 최종 답변(마크다운)을 host 에 렌더 — markdown-it → DOMPurify → innerHTML. */
+  private _renderMarkdown(host: HTMLElement, markdownText: string): void {
+    const wrapper = document.createElement('div');
+    wrapper.classList.add('jp-ChatWidget-markdown');
     try {
-      const model = this._rendermime.createModel({
-        data: { 'text/markdown': markdown }
+      // 1) 마크다운 → HTML 문자열
+      const html = md.render(markdownText);
+      // 2) sanitize — LLM 출력의 위험 요소(event handler, javascript:, data: 등) 제거
+      wrapper.innerHTML = DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+      // 3) 코드블록 우측 상단에 "복사" 버튼 부착
+      this._attachCopyButtons(wrapper);
+      // 4) 자동 링크는 새 탭으로(이미 sanitize 후이므로 안전)
+      wrapper.querySelectorAll('a').forEach(a => {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer');
       });
-      const renderer = this._rendermime.createRenderer('text/markdown');
-      await renderer.renderModel(model);
-      renderer.addClass('jp-ChatWidget-markdown');
-      host.appendChild(renderer.node);
     } catch {
       // 렌더 실패 시 평문 폴백
-      const fallback = document.createElement('div');
-      fallback.innerText = markdown;
-      host.appendChild(fallback);
+      wrapper.innerText = markdownText;
     }
+    host.appendChild(wrapper);
     this._scrollToBottom();
+  }
+
+  /** 렌더된 <pre> 코드블록마다 우측 상단에 "복사" 버튼을 붙입니다. */
+  private _attachCopyButtons(root: HTMLElement): void {
+    root.querySelectorAll('pre').forEach(pre => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'jp-ChatWidget-copyBtn';
+      btn.textContent = '복사';
+      btn.title = '코드 복사';
+      btn.addEventListener('click', e => {
+        e.preventDefault();
+        const code = pre.querySelector('code');
+        const text = code?.textContent ?? '';
+        const restore = () => {
+          window.setTimeout(() => (btn.textContent = '복사'), 1500);
+        };
+        // 폐쇄망/HTTP 환경에서 clipboard API 가 막힌 경우를 위한 폴백
+        const ok = () => {
+          btn.textContent = '복사됨';
+          restore();
+        };
+        const fail = () => {
+          btn.textContent = '실패';
+          restore();
+        };
+        if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard.writeText(text).then(ok, fail);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try {
+            document.execCommand('copy');
+            ok();
+          } catch {
+            fail();
+          } finally {
+            document.body.removeChild(ta);
+          }
+        }
+      });
+      pre.appendChild(btn);
+    });
   }
 
   /** 도구/중간 단계를 기본-접힌 <details> 로 만듭니다(클릭 시 펼침). */
@@ -222,7 +331,7 @@ export class ChatWidget extends Widget {
       if (reply.steps && reply.steps.length) {
         pending.appendChild(this._buildSteps(reply.steps));
       }
-      await this._renderMarkdown(pending, reply.answer || '(빈 응답)');
+      this._renderMarkdown(pending, reply.answer || '(빈 응답)');
     } catch (error) {
       pending.classList.remove('jp-mod-pending', 'jp-mod-assistant');
       pending.classList.add('jp-mod-error');
