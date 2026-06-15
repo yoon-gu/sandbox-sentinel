@@ -2,6 +2,12 @@
 
 > **한 줄 요약**: 사용자가 정의한 LangGraph 그래프를 **터미널 풀스크린 TUI** (Claude Code 스타일 — 상단 히스토리 · 상태바 · 하단 입력) 에서 체험할 수 있게 해주는 single-file REPL 런처. 서버/포트/네트워크 0.
 
+## 데모
+
+![LangGraph Chat REPL (Textual) 데모](demo.webp)
+
+> **실제 JupyterLab 터미널에서** `basic_usage.py`(MockLLM + 최소 LangGraph) 를 띄워 녹화. 계산기 **도구 호출** → **HITL 객관식**(↑↓·Enter) → **슬래시 명령 팔레트**(`/`) → **HITL 복수선택**(Space 토글·Enter) → 상태바(thread·LLM 횟수·토큰·latency) 까지. Textual 풀스크린 TUI 가 **노트북 터미널(xterm.js)** 안에서 그대로 동작합니다. (Playwright 구동)
+
 ## 원본 출처
 
 | 항목 | 값 |
