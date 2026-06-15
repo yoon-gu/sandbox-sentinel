@@ -2,6 +2,12 @@
 
 > **한 줄 요약**: 폐쇄망에서도 돌아가는 `wandb` 호환 실험 트래커 + self-contained HTML 대시보드. `import sentinel_track as wandb` 한 줄로 기존 HuggingFace `Trainer(report_to="wandb")` 학습 코드를 그대로 후킹합니다.
 
+## 데모
+
+![sentinel-track 실험 트래커 + 대시보드 데모](demo.webp)
+
+> **터미널에서 `basic_usage.py`(`import sentinel_track as wandb`) 를 실행** → wandb 스타일 콘솔 로그 → **self-contained `dashboard.html` 자동 생성**. 그 HTML 을 브라우저로 열어 **Runs 검색 필터** → **Run 상세(메트릭 차트)** → **Sweep(parallel-coordinates 로 run 비교 · 체크박스 토글)** 까지. 전부 단일 HTML 안에 임베드되어 외부 네트워크·바이너리 0. (Playwright 구동)
+
 ## 원본 출처
 
 | 항목 | 값 |

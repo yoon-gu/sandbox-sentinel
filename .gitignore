@@ -266,3 +266,6 @@ sentinel_runs/
 
 # 데모 녹화 스크래치 (Playwright/ffmpeg 작업 공간)
 .demo-tooling/
+
+# 002 데모 실행 시 생성되는 scratch runs
+002-sentinel-track/sentinel_runs/
