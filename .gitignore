@@ -263,3 +263,6 @@ sentinel_runs/
 # 005 SQL Runner 영속 history (날짜별 .jsonl, 사내 SQL 흐름이 들어갈 수 있어 커밋 금지)
 .sql_runner_history/
 **/.sql_runner_history/
+
+# 데모 녹화 스크래치 (Playwright/ffmpeg 작업 공간)
+.demo-tooling/

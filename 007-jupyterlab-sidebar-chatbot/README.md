@@ -2,6 +2,12 @@
 
 > **한 줄 요약**: JupyterLab **우측 사이드바**에 탭으로 뜨는 챗봇. 프론트엔드는 정통 TypeScript labextension, 두뇌는 **langgraph 그래프(deepagents)** + **OpenAI 호환 모델**(실 OpenAI / 사내 vLLM / 로컬 Ollama). 멀티턴은 langgraph 체크포인터(`thread_id`)가 관리하고, 응답은 마크다운으로 렌더, 도구·중간 단계는 접이식.
 
+## 데모
+
+![JupyterLab 사이드바 챗봇 데모](demo.webp)
+
+> 실제 JupyterLab(4.5.6) 을 띄워 녹화한 화면입니다. ① 노트북에서 `start_graph_server()` 셀 한 번 실행 → ② 우측 **💬 Chatbot** 탭 → ③ 질문에 **마크다운 + 코드블록(복사 버튼)** 으로 답변 → ④ 도구를 쓰는 작업은 **`🔧 도구·중간 단계`** 를 클릭해 펼쳐 확인. (데모 모델은 로컬 Ollama `qwen3.5`, OpenAI 호환 엔드포인트로 연결 — env 만 바꾸면 사내 vLLM 동일)
+
 ## ⚠️ 성격
 
 **1) 온라인/개발 전용 (네트워크 의존).**
