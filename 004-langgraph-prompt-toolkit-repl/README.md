@@ -2,6 +2,12 @@
 
 > **한 줄 요약**: 003 과 동일한 Claude Code 풍 TUI 챗봇을 **prompt_toolkit 만** 으로 구현한 single-file REPL. Textual 이 사내 미러에 없어도 돌아감 (prompt_toolkit 은 ipython 의 필수 전이 의존).
 
+## 데모
+
+![LangGraph Chat REPL (prompt_toolkit) 데모](demo.webp)
+
+> **실제 JupyterLab 터미널에서** `basic_usage.py`(MockLLM + 최소 LangGraph) 를 띄워 녹화. 계산기 **도구 호출** → **HITL 객관식**(↑↓·Enter) → **슬래시 명령 팔레트**(`/`) → **HITL 복수선택**(Space 토글·Enter) → 상태바(thread·LLM 횟수·토큰·latency) 까지. Playwright 로 키 입력을 구동했습니다.
+
 ## 003 과의 차이
 
 | 항목 | 003 (textual) | 004 (prompt_toolkit) |
