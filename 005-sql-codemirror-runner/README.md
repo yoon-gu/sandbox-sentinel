@@ -4,7 +4,9 @@
 
 ## 시연
 
-![005 SQL Runner 시연](screencast.gif)
+![005 SQL Runner 시연 (JupyterLab demo.ipynb)](demo.webp)
+
+> **실제 JupyterLab 에서 `demo.ipynb` 를 실행**해 녹화했습니다. `runner.show()` 로 뜬 **CodeMirror 에디터(에디터 자체 syntax highlight)** + 좌측 entity 트리 → `Cmd/Ctrl+Enter` 실행 → **결과 표** → `Ctrl+Space` **자동완성 popup**(schema·테이블·키워드)까지. Playwright 로 셀 실행과 에디터 입력을 구동했습니다.
 
 ## 005 / 006 선택 가이드
 
