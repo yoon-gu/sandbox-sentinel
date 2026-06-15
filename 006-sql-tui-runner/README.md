@@ -2,6 +2,12 @@
 
 > **한 줄 요약**: 터미널 풀스크린에서 동작하는 single-file SQL 편집기 + 실행기. Textual TextArea 의 native SQL syntax highlight 로 **에디터 자체에 색이 입혀지고**, Tab 자동완성 (인라인 OptionList), Ctrl+E / Ctrl+R / F5 실행, DataTable 결과 — 모두 터미널 안에서. **모든 단축키는 노트북 터미널 (xterm.js) 호환**.
 
+## 데모
+
+![SQL Runner TUI 데모 (JupyterLab 터미널)](demo.webp)
+
+> **실제 JupyterLab 터미널(xterm.js) 안에서** `basic_usage.py` 를 띄워 녹화 — "노트북 터미널 호환" 을 그대로 보여줍니다. 좌측 스키마 트리, **에디터 자체 syntax highlight**, 테이블명 자동완성(`Ctrl+Space` → `Tab`), `F5` 실행 → **DataTable 결과**(지역별 주문 수·매출 집계)까지. Playwright 로 키 입력을 구동했습니다.
+
 ## 005 / 006 한눈에 비교
 
 | 항목 | 005 (CodeMirror 노트북) | **006 (Textual TUI, 이 변환물)** |
