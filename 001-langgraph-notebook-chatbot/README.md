@@ -6,6 +6,12 @@
 
 > 💡 **Colab 으로 빠르게 체험하기**: 위 배지를 누르면 `demo.ipynb` 가 Google Colab 에서 열립니다. 첫 code 셀이 Colab 을 감지해 GitHub raw URL 에서 `chatbot.py` 를 자동으로 내려받으므로 별도 clone/설치 없이 바로 실행 가능합니다. 폐쇄망 환경에서는 해당 우회가 건너뛰어지고 상대경로로 로드됩니다.
 
+## 데모
+
+![LangGraph 노트북 챗봇 데모](demo.webp)
+
+> **실제 JupyterLab 에서 `demo.ipynb` 의 `chat_ui()` 셀을 실행**해 녹화. **멀티턴 대화**(이전 맥락 유지) → **계산기 도구 호출**(TOOL 풍선) → **HITL 복수선택**(입력창이 체크박스 그룹으로 자동 전환 → 답변 제출) → **트레이스 HTML 반출**(`💾 trace_*.html`, self-contained · 12 spans) 까지. 외부 모델 없이 MockLLM 으로 전 기능 시연. (Playwright 구동)
+
 ## 원본 출처
 
 | 항목 | 값 |
