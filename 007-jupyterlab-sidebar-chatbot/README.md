@@ -23,7 +23,7 @@
 
 **3) 키는 환경변수로만.** 코드/노트북에 하드코딩 금지.
 
-**4) single-file 아님 + wheel 무의존성.** 다수 파일 + npm 빌드 필요, 반입 단위는 `.whl`. **wheel 은 코드만** — deepagents·langchain-openai·langchain-anthropic 은 직접 설치.
+**4) single-file 아님 + wheel 무의존성.** 다수 파일 + npm 빌드 필요, 반입 단위는 `.whl`. **wheel 은 코드만** — deepagents·langchain-openai 는 직접 설치.
 
 ## 아키텍처
 
@@ -73,15 +73,14 @@
 ## 의존성 (wheel 에는 미포함 — 직접 설치)
 
 ```bash
-pip install deepagents langchain-openai langchain-anthropic
-#            └ 그래프      └ ChatOpenAI(사내 vLLM 포함)  └ deepagents 0.4.x 가 import 시점에 참조
+pip install deepagents langchain-openai
+#            └ 그래프      └ ChatOpenAI (OpenAI 호환 — 실 OpenAI / 사내 vLLM / Ollama)
 ```
 
 | 구분 | 패키지 | 비고 |
 |---|---|---|
-| 두뇌 | `deepagents` | langgraph 그래프(create_deep_agent) |
+| 두뇌 | `deepagents` | langgraph 그래프(create_deep_agent). langchain·langchain-anthropic 등은 deepagents 가 의존성으로 자동 설치 |
 | 모델 어댑터 | `langchain-openai`(→`openai`) | OpenAI 호환 — base_url 만 바꾸면 vLLM/Ollama |
-| 전이 import | `langchain-anthropic` | deepagents 0.4.x 가 모듈 로드 시 무조건 import (안 써도 필요) |
 | 프론트(번들됨) | `@jupyterlab/application`·`ui-components`, `@lumino/widgets`·`messaging`, `markdown-it`·`highlight.js`(cherry-pick)·`dompurify` | 빌드 시. wheel 에 모두 번들됨 |
 
 ## 사용 예시
@@ -95,7 +94,7 @@ pip wheel . -w dist --no-deps      # 무의존성 .whl
 
 ### 2) 설치 & 실행 (jupyter 재시작 없이)
 ```bash
-pip install deepagents langchain-openai langchain-anthropic
+pip install deepagents langchain-openai
 pip install jlab_sidebar_chatbot-*.whl       # 또는 노트북: %pip install dist/*.whl
 ```
 환경변수 설정 (사내 vLLM 예시):
@@ -142,7 +141,7 @@ start_graph_server(
 ## 알려진 제약/한계점
 - **OpenAI 호환 엔드포인트 필수** — `OPENAI_API_KEY` 필수. 실 OpenAI 는 외부망, 사내 vLLM 은 내부망. 어느 쪽이든 httpx 사용.
 - **tool calling 지원 모델 필요** — deepagents 가 `write_todos`/`write_file` 등 도구를 부릅니다. 사내 vLLM 이면 모델이 OpenAI 호환 tool-call(예: Llama-3.1-instruct, Qwen-함수콜링 템플릿)을 제대로 내보내야 단계가 정상 — 안 되면 답변만 오고 steps 가 비어 보입니다.
-- **wheel 무의존성** — deepagents·langchain-openai·langchain-anthropic 을 직접 설치해야 동작.
+- **wheel 무의존성** — deepagents·langchain-openai 를 직접 설치해야 동작 (langchain-anthropic 등은 deepagents 가 자동으로 끌어옴).
 - **localhost 전제** — 브라우저 `127.0.0.1` == 커널 기계.
 - **셀 한 줄 실행 필요** — 매 커널 세션마다 `start_graph_server()`. 포트 기본 8765 (server.py / handler.ts 상수 일치).
 - **single-file 아님** — 다수 파일 + npm 빌드.
