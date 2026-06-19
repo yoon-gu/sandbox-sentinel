@@ -16,7 +16,7 @@ jlab_sidebar_chatbot — JupyterLab 우측 사이드바 챗봇
 """
 
 from ._version import __version__
-from .graph import DEFAULT_MODEL, build_chat_graph, reply, run_turn
+from .graph import DEFAULT_MODEL, build_chat_graph, reply, run_turn, stream_turn
 from .server import DEFAULT_PORT, start_graph_server, stop_graph_server
 
 
@@ -31,6 +31,7 @@ __all__ = [
     "build_chat_graph",
     "reply",
     "run_turn",
+    "stream_turn",
     "DEFAULT_PORT",
     "start_graph_server",
     "stop_graph_server",

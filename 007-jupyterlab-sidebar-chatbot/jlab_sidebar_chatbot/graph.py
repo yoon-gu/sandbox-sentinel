@@ -14,8 +14,9 @@
 
 from __future__ import annotations
 
+import json
 import os
-from typing import Optional
+from typing import Iterator, Optional
 
 # 모델·엔드포인트는 환경변수로 — 사내 vLLM 운영 전환은 OPENAI_BASE_URL/MODEL 만 바꾸면 끝.
 DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
@@ -81,21 +82,14 @@ def _text(content) -> str:
     return content if isinstance(content, str) else str(content)
 
 
-def run_turn(graph, thread_id: str, message: str) -> dict:
-    """그래프를 thread_id 로 한 턴 실행하고 '최종 답변 + 중간 도구 단계' 를 분리해 반환합니다.
+def _split_turn(msgs) -> dict:
+    """이번 턴의 메시지 목록에서 '최종 답변 + 중간 도구 단계' 를 분리합니다.
 
     deepagents 는 한 턴에 여러 메시지(도구 호출 AI 메시지 · 도구 결과 등)를 만듭니다.
     프론트가 최종 답변은 그대로, 도구 관련 단계는 접어서 보여줄 수 있게 구조화합니다.
 
     반환: {"answer": str, "steps": [{"type", "label", "detail"}, ...]}
     """
-    import json
-
-    result = graph.invoke(
-        {"messages": [{"role": "user", "content": message}]},
-        {"configurable": {"thread_id": thread_id}},
-    )
-    msgs = result["messages"]
     # 이번 턴에 새로 생긴 메시지 = 마지막 human(=방금 보낸 입력) 이후
     human_idxs = [i for i, m in enumerate(msgs) if getattr(m, "type", None) == "human"]
     turn = msgs[(human_idxs[-1] + 1):] if human_idxs else msgs
@@ -126,6 +120,54 @@ def run_turn(graph, thread_id: str, message: str) -> dict:
     return {"answer": answer, "steps": steps}
 
 
+def run_turn(graph, thread_id: str, message: str) -> dict:
+    """그래프를 thread_id 로 한 턴 실행하고 '최종 답변 + 중간 도구 단계' 를 분리해 반환합니다.
+
+    반환: {"answer": str, "steps": [{"type", "label", "detail"}, ...]}
+    """
+    result = graph.invoke(
+        {"messages": [{"role": "user", "content": message}]},
+        {"configurable": {"thread_id": thread_id}},
+    )
+    return _split_turn(result["messages"])
+
+
+def stream_turn(graph, thread_id: str, message: str) -> Iterator[dict]:
+    """그래프를 thread_id 로 한 턴 실행하며 '토큰' 을 흘려보내는 제너레이터.
+
+    SSE 전송(server.py)이 그대로 클라이언트로 흘려보낼 수 있게 dict 이벤트를 순서대로 yield 합니다.
+        {"type": "token", "text": "..."}  최종 답변이 LLM 에서 생성되는 토큰 조각 (여러 번)
+        {"type": "done",  "answer": str, "steps": [...]}  끝에 한 번 — 권위 있는 최종 결과
+
+    동작:
+      - langgraph 의 stream_mode=["messages", "values"] 를 함께 켜서
+          · "messages": LLM 이 뱉는 토큰 조각(AIMessageChunk) → 화면에 실시간 표시용
+          · "values"  : 매 스텝의 전체 상태 → 마지막 것에서 권위 있는 answer/steps 계산
+      - 도구 호출 조각은 본문(content)이 비어 있어 자연히 토큰으로 안 나갑니다.
+      - 토큰은 '미리보기' 일 뿐, 최종 표시는 "done" 의 answer/steps 가 기준입니다
+        (그래서 중간 생각이 잠깐 새어 보여도 done 시점에 올바르게 정리됩니다).
+    """
+    final_msgs = None
+    for mode, chunk in graph.stream(
+        {"messages": [{"role": "user", "content": message}]},
+        {"configurable": {"thread_id": thread_id}},
+        stream_mode=["messages", "values"],
+    ):
+        if mode == "messages":
+            msg_chunk, _meta = chunk  # (메시지 조각, 메타데이터)
+            # 토큰 스트리밍 대상은 AI 메시지 조각만 (도구 결과/사용자 메시지 제외)
+            if getattr(msg_chunk, "type", "") in ("ai", "AIMessageChunk"):
+                text = _text(getattr(msg_chunk, "content", ""))
+                if text:
+                    yield {"type": "token", "text": text}
+        elif mode == "values":
+            # 매번 전체 상태 — 마지막 것이 이번 턴 전체 메시지를 담습니다.
+            final_msgs = chunk.get("messages") if isinstance(chunk, dict) else None
+
+    out = _split_turn(final_msgs or [])
+    yield {"type": "done", **out}
+
+
 def reply(graph, thread_id: str, message: str) -> str:
     """한 턴 실행 후 최종 답변 텍스트만 반환합니다(단계는 무시)."""
     return run_turn(graph, thread_id, message)["answer"]
@@ -138,7 +180,12 @@ if __name__ == "__main__":
     tid = "demo-thread"
     for line in ["내 이름은 윤구야.", "내 이름이 뭐였지?"]:
         print(f"🙂 {line}")
-        out = run_turn(g, tid, line)
-        if out["steps"]:
-            print(f"   (단계 {len(out['steps'])}개)")
-        print(f"🤖 {out['answer']}\n")
+        # 토큰 스트리밍 — 답변이 생성되는 대로 한 조각씩 출력
+        print("🤖 ", end="", flush=True)
+        steps = []
+        for ev in stream_turn(g, tid, line):
+            if ev["type"] == "token":
+                print(ev["text"], end="", flush=True)
+            elif ev["type"] == "done":
+                steps = ev["steps"]
+        print(f"\n   (단계 {len(steps)}개)\n" if steps else "\n")

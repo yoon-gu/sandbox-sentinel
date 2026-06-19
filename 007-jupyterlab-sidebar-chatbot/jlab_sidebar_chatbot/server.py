@@ -6,9 +6,13 @@ langgraph 그래프를 localhost HTTP 로 서빙하는 얕은 전송 계층.
 호출하는 /chat·/reset·/health 만 제공합니다(직접 만든 LLM 클래스는 없습니다).
 
 엔드포인트:
-    POST  /chat    {session_id, message} -> {role, answer, steps}  (steps=도구 단계, 접이식)
-    POST  /reset   {session_id}          -> {ok: true}   (해당 세션 thread 를 새로 분기)
-    GET   /health                         -> {ok: true}
+    POST  /chat         {session_id, message} -> {role, answer, steps}  (한 번에 응답)
+    POST  /chat/stream  {session_id, message} -> SSE (text/event-stream)
+            event: token  data: {text}            최종 답변 토큰 조각 (여러 번)
+            event: done   data: {answer, steps}   끝에 한 번 — 권위 있는 최종 결과
+            event: error  data: {error}           실패 시
+    POST  /reset        {session_id}          -> {ok: true}   (해당 세션 thread 를 새로 분기)
+    GET   /health                              -> {ok: true}
 
 ⚠️ 온라인/개발 전용 (graph.py 가 OpenAI 호환 모델 호출). 브라우저 127.0.0.1 == 커널 127.0.0.1 전제.
 사용 (노트북 셀):
@@ -33,7 +37,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, Optional
 
-from .graph import build_chat_graph, run_turn
+from .graph import build_chat_graph, run_turn, stream_turn
 
 # 프론트엔드(handler.ts)의 DEFAULT_PORT 와 반드시 일치해야 합니다.
 DEFAULT_PORT = 8765
@@ -65,6 +69,24 @@ def _make_handler(graph):
             self.end_headers()
             self.wfile.write(body)
 
+        def _sse_start(self):
+            """SSE 응답 시작 — Content-Length 없이 열어두고 조각마다 flush 합니다."""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            # 일부 프록시가 버퍼링해 스트리밍이 끊겨 보이는 것 방지
+            self.send_header("X-Accel-Buffering", "no")
+            self._cors()
+            self.end_headers()
+
+        def _sse_event(self, event: str, payload: dict):
+            """SSE 한 프레임(event/data) 을 보내고 즉시 flush 합니다."""
+            data = json.dumps(payload, ensure_ascii=False)
+            frame = f"event: {event}\ndata: {data}\n\n".encode("utf-8")
+            self.wfile.write(frame)
+            self.wfile.flush()
+
         def do_OPTIONS(self):  # 프리플라이트
             self.send_response(204)
             self._cors()
@@ -88,7 +110,26 @@ def _make_handler(graph):
             path = self.path.split("?")[0].rstrip("/")
             session_id = (body.get("session_id") or "default") or "default"
 
-            if path.endswith("/chat"):
+            if path.endswith("/chat/stream"):
+                message = (body.get("message") or "").strip()
+                if not message:
+                    self._json(400, {"error": "message 가 비어 있습니다"})
+                    return
+                # SSE 시작 후에는 헤더를 못 바꾸므로, 에러도 event: error 로 흘려보냅니다.
+                self._sse_start()
+                try:
+                    for ev in stream_turn(graph, thread_id(session_id), message):
+                        etype = ev.pop("type")  # 'token' | 'done'
+                        self._sse_event(etype, ev)
+                except (BrokenPipeError, ConnectionResetError):
+                    # 클라이언트가 먼저 끊음 — 조용히 종료
+                    pass
+                except Exception as exc:  # 그래프/LLM 호출 실패를 스트림으로 전달
+                    try:
+                        self._sse_event("error", {"error": f"그래프 호출 실패: {exc}"})
+                    except Exception:
+                        pass
+            elif path.endswith("/chat"):
                 message = (body.get("message") or "").strip()
                 if not message:
                     self._json(400, {"error": "message 가 비어 있습니다"})

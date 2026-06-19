@@ -53,3 +53,91 @@ export async function requestBrain<T>(
 
   return (await response.json()) as T;
 }
+
+/**
+ * SSE(text/event-stream) 스트리밍 엔드포인트(/chat/stream)를 호출합니다.
+ *
+ * EventSource 는 GET 전용이라 본문 POST 와 안 맞아, fetch 의 ReadableStream 을
+ * 직접 읽어 SSE 프레임(event:/data:)을 파싱합니다.
+ *
+ * @param endPoint 'chat/stream'
+ * @param body     요청 JSON (예: {session_id, message})
+ * @param onToken  'token' 이벤트가 올 때마다 호출 — 답변 조각을 화면에 이어붙이는 콜백
+ * @returns        'done' 이벤트의 페이로드(권위 있는 최종 {answer, steps})
+ */
+export async function streamBrain<T>(
+  endPoint: string,
+  body: unknown,
+  onToken: (text: string) => void,
+  port: number = DEFAULT_PORT
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl(port)}/${endPoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  } catch (error) {
+    // 연결 거부 = 서버 미기동. 사용자에게 시작 방법을 알려줍니다.
+    throw new Error(START_HINT);
+  }
+
+  if (!response.ok || !response.body) {
+    let detail = '';
+    try {
+      detail = JSON.stringify(await response.json());
+    } catch {
+      // 본문 파싱 실패는 무시
+    }
+    throw new Error(`서버 오류 HTTP ${response.status} ${detail}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: unknown = {};
+
+  // 한 SSE 프레임("event: x\ndata: y") 을 해석합니다.
+  const handleFrame = (frame: string): void => {
+    let event = 'message';
+    const dataLines: string[] = [];
+    for (const line of frame.split('\n')) {
+      if (line.startsWith('event:')) {
+        event = line.slice(6).trim();
+      } else if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).trim());
+      }
+    }
+    if (!dataLines.length) {
+      return;
+    }
+    const payload = JSON.parse(dataLines.join('\n'));
+    if (event === 'token') {
+      onToken(payload.text ?? '');
+    } else if (event === 'done') {
+      result = payload;
+    } else if (event === 'error') {
+      throw new Error(payload.error || '스트리밍 오류');
+    }
+  };
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    // SSE 프레임은 빈 줄(\n\n) 로 구분됩니다.
+    let sep: number;
+    while ((sep = buffer.indexOf('\n\n')) >= 0) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      if (frame.trim()) {
+        handleFrame(frame);
+      }
+    }
+  }
+
+  return result as T;
+}

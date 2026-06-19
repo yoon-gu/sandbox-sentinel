@@ -30,7 +30,7 @@ import yaml from 'highlight.js/lib/languages/yaml';
 import markdown from 'highlight.js/lib/languages/markdown';
 import plaintext from 'highlight.js/lib/languages/plaintext';
 
-import { requestBrain } from './handler';
+import { requestBrain, streamBrain } from './handler';
 
 // 폐쇄망에서 자주 쓰는 언어만 등록 — 번들 크기 절약(전체는 700KB+, 이건 ~25KB).
 hljs.registerLanguage('python', python);
@@ -306,7 +306,8 @@ export class ChatWidget extends Widget {
     (this._sendButton as HTMLButtonElement).disabled = busy;
   }
 
-  /** 입력값을 서버로 보내고, 도구 단계(접힘) + 최종 답변(마크다운)을 표시합니다. */
+  /** 입력값을 서버로 보내고, 토큰을 실시간으로 흘려 받은 뒤
+   *  done 시점에 도구 단계(접힘) + 최종 답변(마크다운)으로 마무리합니다. */
   private async _send(): Promise<void> {
     const text = this._input.value.trim();
     if (!text) {
@@ -321,17 +322,29 @@ export class ChatWidget extends Widget {
     pending.classList.add('jp-mod-pending');
 
     try {
-      const reply = await requestBrain<ChatReply>('chat', {
-        method: 'POST',
-        body: JSON.stringify({ session_id: this._sessionId, message: text })
-      });
+      // 토큰이 오는 대로 평문으로 이어붙여 '실시간 미리보기' 를 보여줍니다.
+      let streamed = '';
+      const reply = await streamBrain<ChatReply>(
+        'chat/stream',
+        { session_id: this._sessionId, message: text },
+        token => {
+          if (streamed === '') {
+            pending.classList.remove('jp-mod-pending');
+          }
+          streamed += token;
+          pending.innerText = streamed;
+          this._scrollToBottom();
+        }
+      );
+      // done 도착 — 미리보기를 지우고 권위 있는 결과로 최종 렌더.
       pending.classList.remove('jp-mod-pending');
       pending.innerText = '';
       // 도구·중간 단계는 접어서 먼저(클릭하면 펼침), 그 아래 최종 답변을 마크다운으로
       if (reply.steps && reply.steps.length) {
         pending.appendChild(this._buildSteps(reply.steps));
       }
-      this._renderMarkdown(pending, reply.answer || '(빈 응답)');
+      // done 의 answer 가 기준. (혹시 비면 스트리밍으로 받은 텍스트로 폴백)
+      this._renderMarkdown(pending, reply.answer || streamed || '(빈 응답)');
     } catch (error) {
       pending.classList.remove('jp-mod-pending', 'jp-mod-assistant');
       pending.classList.add('jp-mod-error');

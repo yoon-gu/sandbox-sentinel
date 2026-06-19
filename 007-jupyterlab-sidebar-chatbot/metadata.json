@@ -29,7 +29,8 @@
     "응답 마크다운 자체 렌더 (markdown-it + highlight.js cherry-pick + DOMPurify) — JupyterLab jp-RenderedHTMLCommon 큰 여백 안 거치고 챗에 맞게 컴팩트. hljs 토큰 색은 --jp-mirror-editor-* 변수에 매핑해 라이트/다크 자동 적응",
     "코드블록 hover 시 우측 상단 '복사' 버튼 (clipboard API + execCommand 폴백 — HTTP 폐쇄망 대응)",
     "도구·중간 단계는 기본 접힌 <details>(클릭 펼침)",
-    "서빙 = 노트북 셀에서 띄우는 stdlib http.server(얕은 전송, /chat·/reset·/health) — start_graph_server()",
+    "SSE 토큰 스트리밍: stream_turn() 이 graph.stream(stream_mode=[messages,values]) 로 최종 답변 토큰을 흘려보냄. server.py /chat/stream(event: token→done), 프론트는 fetch ReadableStream 으로 SSE 파싱해 실시간 표시 후 done 의 {answer,steps} 로 마크다운 최종 렌더. /chat(한 번에 응답)은 폴백 유지",
+    "서빙 = 노트북 셀에서 띄우는 stdlib http.server(얕은 전송, /chat/stream·/chat·/reset·/health) — start_graph_server()",
     "jupyter 서버 재시작 불필요: 프론트는 설치+새로고침, 두뇌는 커널 셀 서버. 노트북 셀에서 %pip install(설치) ~ stop_graph_server()+pip uninstall(정리)까지 완결"
   ],
   "limitations": [
@@ -41,6 +42,7 @@
     "매 커널 세션마다 start_graph_server() 한 줄 실행 필요. 포트 기본 8765 (server.py / handler.ts 상수 일치).",
     "single-file 아님: 다수 파일 + npm 빌드. 반입 단위는 wheel(.whl).",
     "대화 기록은 InMemorySaver(메모리) 한정 — 커널 재시작/stop/reset 시 소실.",
+    "스트리밍은 최종 답변 토큰만(MVP): 스트리밍 중엔 평문 미리보기, 도구·중간 단계는 done 후 접이식 표시(실시간 아님). 모델이 토큰 스트리밍을 지원해야 체감(미지원이면 done 시 일괄). src/*.ts 변경이라 jlpm build + wheel 재빌드 필요.",
     "langgraph 를 1.2.2 로 올림(deepagents 0.4.5 호환). 리포 기본 스택 핀(1.0.10)과 달라 공유 .venv 의 다른 변환물(001/003/004)에 영향 가능.",
     "JupyterLab 4 전용. 스트리밍 응답은 범위 외."
   ],
@@ -49,6 +51,7 @@
     "wheel": "pip wheel . -w dist --no-deps",
     "install": "pip install jlab_sidebar_chatbot-*.whl  (또는 노트북 %pip install dist/*.whl)",
     "use": "브라우저 새로고침 → 💬 탭 / 노트북: start_graph_server() (env) 또는 start_graph_server(api_key=, base_url=, model=) (사내 vLLM 한 줄)",
-    "verified_2026-05-28": "ChatOpenAI 로 build_chat_graph 구성 확인(인자/env 우선순위, RuntimeError 메시지). 실 endpoint 호출 검증은 사용자 환경에서."
+    "verified_2026-05-28": "ChatOpenAI 로 build_chat_graph 구성 확인(인자/env 우선순위, RuntimeError 메시지). 실 endpoint 호출 검증은 사용자 환경에서.",
+    "note_2026-06-19": "SSE 토큰 스트리밍 추가(graph.stream_turn / server.py /chat/stream / src streamBrain). 파이썬은 py_compile 통과. 프론트(src/*.ts) 재빌드(jlpm install && build:prod)와 wheel 재빌드, 실 endpoint 스트리밍 동작/ demo.webp 재녹화는 사용자 dev 환경에서 필요(이 작업 환경엔 jlpm/node_modules 없음)."
   }
 }

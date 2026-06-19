@@ -1,6 +1,6 @@
 # 007 - JupyterLab Sidebar Chatbot
 
-> **한 줄 요약**: JupyterLab **우측 사이드바**에 탭으로 뜨는 챗봇. 프론트엔드는 정통 TypeScript labextension, 두뇌는 **langgraph 그래프(deepagents)** + **OpenAI 호환 모델**(실 OpenAI / 사내 vLLM / 로컬 Ollama). 멀티턴은 langgraph 체크포인터(`thread_id`)가 관리하고, 응답은 마크다운으로 렌더, 도구·중간 단계는 접이식.
+> **한 줄 요약**: JupyterLab **우측 사이드바**에 탭으로 뜨는 챗봇. 프론트엔드는 정통 TypeScript labextension, 두뇌는 **langgraph 그래프(deepagents)** + **OpenAI 호환 모델**(실 OpenAI / 사내 vLLM / 로컬 Ollama). 멀티턴은 langgraph 체크포인터(`thread_id`)가 관리하고, 응답은 **SSE 로 토큰 스트리밍**하며 마크다운으로 렌더, 도구·중간 단계는 접이식.
 
 ## 데모
 
@@ -32,20 +32,20 @@
 ┌───────────────┬──────────────────┬─────────────────────┐
 │  파일 탐색기   │   노트북/에디터    │  💬 챗봇 탭 (right)  │  ← 프론트 labextension (src/)
 └──────┬────────┴──────────────────┴─────────┬───────────┘
-       │ 셀에서 start_graph_server() 실행       │ fetch http://127.0.0.1:8765/chat
+       │ 셀에서 start_graph_server() 실행       │ fetch(SSE) http://127.0.0.1:8765/chat/stream
        ▼                                        ▼
-   노트북 커널 (Python)                          server.py (stdlib http + CORS, 얕은 전송)
-                                                  └─ graph.run_turn(graph, thread_id, msg)
-                                                       └─ langgraph CompiledStateGraph
+   노트북 커널 (Python)                          server.py (stdlib http + CORS, SSE 스트리밍)
+                                                  └─ graph.stream_turn(graph, thread_id, msg)
+                                                       └─ langgraph CompiledStateGraph.stream()
                                                             (deepagents.create_deep_agent)
                                                             + InMemorySaver(thread_id=세션)
                                                                  └─ ChatOpenAI(base_url=…)
                                                                       → 실 OpenAI / 사내 vLLM
 ```
 
-- **프론트(`src/`)**: 답변은 `markdown-it` + `highlight.js`(cherry-pick) 로 자체 렌더, `DOMPurify` 로 sanitize. 코드블록 hover 시 우측 상단에 "복사" 버튼. 도구·중간 단계는 기본 접힌 `<details>`(클릭 시 펼침).
-- **두뇌(`graph.py`)**: deepagents 그래프 + InMemorySaver. 모델은 `ChatOpenAI(base_url=env, api_key=env, model=env)` — env 만 바꾸면 OpenAI ↔ vLLM ↔ Ollama 동일 코드.
-- **서빙(`server.py`)**: 얕은 HTTP 전송(`/chat`·`/reset`·`/health`). `/chat` 응답은 `{answer, steps}`.
+- **프론트(`src/`)**: 토큰을 SSE 로 받아 실시간으로 이어붙여 보여주고, `done` 시점에 `markdown-it` + `highlight.js`(cherry-pick) 로 최종 재렌더 + `DOMPurify` sanitize. 코드블록 hover 시 우측 상단에 "복사" 버튼. 도구·중간 단계는 기본 접힌 `<details>`(클릭 시 펼침).
+- **두뇌(`graph.py`)**: deepagents 그래프 + InMemorySaver. 모델은 `ChatOpenAI(base_url=env, api_key=env, model=env)` — env 만 바꾸면 OpenAI ↔ vLLM ↔ Ollama 동일 코드. `stream_turn()` 이 `graph.stream(stream_mode=["messages","values"])` 로 토큰을 흘려보냄.
+- **서빙(`server.py`)**: 얕은 HTTP 전송(`/chat/stream`(SSE)·`/chat`·`/reset`·`/health`). `/chat/stream` 은 `event: token`(조각) → `event: done`(`{answer, steps}`) 순서로 흘림. `/chat` 은 한 번에 `{answer, steps}` 응답(폴백).
 
 ### jupyter 서버 재시작 불필요
 - 프론트 labextension 은 설치 + **브라우저 새로고침**만으로 뜸(jupyter 가 페이지 로드마다 labextensions 폴더 스캔).
@@ -66,6 +66,7 @@
 - 우측 사이드바 탭(shout 예제 패턴), 채팅 UI(Enter 전송 · Shift+Enter 줄바꿈 · 새 대화).
 - **마크다운 답변 자체 렌더** (`markdown-it` + `highlight.js` cherry-pick + `DOMPurify` sanitize) — JupyterLab 의 `jp-RenderedHTMLCommon` 큰 여백 안 거치고 챗에 맞게 컴팩트하게.
 - **코드블록 복사 버튼** — hover 시 우측 상단에 등장, `clipboard` API + `execCommand` 폴백(HTTP 폐쇄망 대응).
+- **SSE 토큰 스트리밍** — 답변이 생성되는 대로 토큰을 실시간 표시(`/chat/stream`). 끝(`done`)에 권위 있는 `{answer, steps}` 로 마크다운 최종 렌더. `/chat`(한 번에 응답)도 폴백으로 유지.
 - **도구·중간 단계 접이식** — `{answer, steps}` 구조. 단계는 기본 접힘, 클릭 시 펼침.
 - **멀티턴** — langgraph `InMemorySaver` + `thread_id`(=세션). `새 대화` 는 thread 분기.
 - **모델·엔드포인트 교체** — 환경변수만 (`OPENAI_BASE_URL`/`OPENAI_API_KEY`/`OPENAI_MODEL`). 코드 변경 0.
@@ -146,4 +147,6 @@ start_graph_server(
 - **셀 한 줄 실행 필요** — 매 커널 세션마다 `start_graph_server()`. 포트 기본 8765 (server.py / handler.ts 상수 일치).
 - **single-file 아님** — 다수 파일 + npm 빌드.
 - **대화 기록은 메모리 한정** — 커널 재시작 / `stop_graph_server()` / `/reset` 시 소실.
-- **JupyterLab 4 전용**. 스트리밍 응답은 범위 외.
+- **스트리밍은 최종 답변 토큰만** — 스트리밍 중엔 평문 미리보기, 도구·중간 단계는 `done` 후 접이식으로 표시(실시간 아님). 모델이 토큰 스트리밍을 지원해야 체감됨(미지원이면 done 시 한꺼번에 표시).
+- **프론트 변경 시 재빌드 필요** — `src/*.ts` 를 고치면 `jlpm install && jlpm run build:prod` 후 wheel 재빌드해야 반영됩니다(파이썬만 고치면 커널 재시작으로 충분).
+- **JupyterLab 4 전용**.
