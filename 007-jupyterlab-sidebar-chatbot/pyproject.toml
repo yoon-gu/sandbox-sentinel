@@ -25,7 +25,8 @@ classifiers = [
   "Programming Language :: Python :: 3.11"
 ]
 # 런타임 의존성 없음 — wheel 은 코드만 담습니다. 폐쇄망에서 사용자가 직접 설치하세요:
-#   pip install deepagents langchain-openai
+#   pip install deepagents langchain-openai   # provider="openai"(기본): 실 OpenAI / 사내 vLLM
+#   pip install langchain-ollama              # provider="ollama"(선택): 로컬 Ollama 네이티브
 #   (langchain·langchain-anthropic 등은 deepagents 가 의존성으로 자동 설치됨)
 dependencies = []
 dynamic = ["version"]

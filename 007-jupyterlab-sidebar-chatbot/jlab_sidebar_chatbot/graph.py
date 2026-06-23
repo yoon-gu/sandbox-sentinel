@@ -1,14 +1,17 @@
 """
 챗봇 두뇌 = langgraph 그래프 (deepagents 로 생성) + InMemorySaver 체크포인터.
 
-⚠️ 온라인/개발 전용 (모델은 OpenAI 호환 엔드포인트로 통신)
-   - 실 OpenAI 또는 사내 vLLM/Ollama 등 **OpenAI 호환 REST**(/v1) 에 붙습니다.
-     사내 vLLM 으로 가면 내부 네트워크라 외부망 호출은 아니지만, langchain-openai/openai
-     (httpx 기반)는 폐쇄망 패키지 정책 확인이 필요합니다.
-   - 환경변수만 바꾸면 dev ↔ 운영 그대로:
+⚠️ 온라인/개발 전용. 두 가지 백엔드(provider)를 지원합니다:
+   - provider="openai" (기본): OpenAI 호환 /v1 — 실 OpenAI / 사내 vLLM / 로컬 Ollama(/v1).
+       langchain-openai(httpx 기반)는 폐쇄망 패키지 정책 확인이 필요합니다.
        OPENAI_API_KEY   : 필수
        OPENAI_BASE_URL  : 선택. 비우면 실 OpenAI, 사내 vLLM 이면 https://<host>/v1
        OPENAI_MODEL     : 선택. 기본 gpt-4o-mini, vLLM 이면 served-model-name.
+   - provider="ollama": Ollama 네이티브 /api/chat (ChatOllama). 키 불필요이고, 생각(thinking)
+       끄기가 동작해 첫 토큰이 즉시 나옵니다(가장 빠름). langchain-ollama 패키지 필요.
+       CHAT_PROVIDER : "openai" | "ollama" (기본 openai)
+       OLLAMA_MODEL  : 기본 qwen3.5:0.8b
+       OLLAMA_BASE_URL : 기본 http://localhost:11434 (루트 URL — .../v1 아님)
    - 키는 코드/노트북에 하드코딩하지 말고 셸/jupyter env 로 주입하세요.
 """
 
@@ -16,13 +19,78 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from typing import Iterator, Optional
 
-# 모델·엔드포인트는 환경변수로 — 사내 vLLM 운영 전환은 OPENAI_BASE_URL/MODEL 만 바꾸면 끝.
-DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+# 모델·엔드포인트 기본값은 인자 > 환경변수 순으로 정해집니다 — 사내 vLLM 전환은
+# base_url/model 만 바꾸면 끝. (openai 기본 모델 "gpt-4o-mini" 는 build_chat_graph 안에서 처리)
+# Ollama(네이티브) 기본값 — provider="ollama" 일 때 사용.
+DEFAULT_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.5:0.8b")
+DEFAULT_OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 DEFAULT_SYSTEM_PROMPT = (
     "너는 폐쇄망 Jupyter 환경에서 동작하는 친절한 도우미야. 한국어로 간결하게 답해."
 )
+
+
+def _build_chat_model(provider, model, api_key, base_url, thinking):
+    """provider 에 맞는 langchain chat 모델을 만듭니다 (토큰 스트리밍 + thinking 토글).
+
+    thinking 의미: None=모델 기본(스위치 안 보냄) / False=생각 끔 / True=생각 유지.
+
+    - "openai": ChatOpenAI (실 OpenAI / 사내 vLLM 등 OpenAI 호환 /v1 엔드포인트).
+        · streaming=True 로 토큰을 조각조각 흘립니다(없으면 통으로 나옴).
+        · thinking 이 '명시적으로 False' 이고 자체 서빙(base_url 지정)이며 실 OpenAI 가
+          아닐 때만 extra_body={"chat_template_kwargs": {"enable_thinking": False}} 를
+          붙여 생각을 끕니다. (thinking=None 기본이면 아무 스위치도 안 보내 기존 vLLM
+          동작을 그대로 유지 — 모르는 파라미터로 400 나는 걸 방지.)
+          (Ollama 의 /v1 은 이 스위치를 무시하므로 Ollama 는 아래 ChatOllama 를 쓰세요.)
+    - "ollama": ChatOllama (Ollama 네이티브 /api/chat).
+        · reasoning=False 가 네이티브 think:false → 생각 단계를 꺼서 첫 토큰이 즉시 나옵니다.
+          (Ollama 에서 thinking 을 끄는 유일하게 동작하는 스위치) · API 키 불필요.
+    """
+    if provider == "ollama":
+        try:
+            from langchain_ollama import ChatOllama
+        except ImportError as exc:  # 패키지 미설치 시 친절한 안내로 바꿔 전달
+            raise RuntimeError(
+                "provider='ollama' 에는 langchain-ollama 패키지가 필요합니다. "
+                "설치: pip install langchain-ollama  "
+                "(OpenAI 호환 엔드포인트면 provider='openai'(기본) + langchain-openai 를 쓰세요.)"
+            ) from exc
+
+        return ChatOllama(
+            model=model,
+            base_url=base_url or DEFAULT_OLLAMA_BASE_URL,
+            temperature=0,
+            # reasoning: None=모델 기본 / False=생각 OFF / True=유지.
+            # (thinking=True 는 reasoning 지원 모델에서만 의미 있고, 아니면 조용히 무시됩니다)
+            reasoning=thinking,
+        )
+
+    # provider == "openai" (실 OpenAI / 사내 vLLM)
+    from langchain_openai import ChatOpenAI
+
+    if not api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY 가 필요합니다. 인자(api_key=...) 또는 환경변수(OPENAI_API_KEY) 로 "
+            "주입하세요. 코드/노트북에 키를 하드코딩하지 마세요. "
+            "(로컬 Ollama 를 쓰려면 provider='ollama' 로 호출하세요 — 키 불필요.)"
+        )
+    extra_body = None
+    if thinking is False and base_url and "openai.com" not in base_url:
+        # '명시적으로 thinking=False' + 자체 서빙(vLLM 등) + 실 OpenAI 아님 일 때만.
+        extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
+    return ChatOpenAI(
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        temperature=0,
+        # ⚠️ 토큰 스트리밍의 핵심. 이 값이 없으면(기본 False) ChatOpenAI 가 비스트리밍
+        # 호출을 해서 langgraph stream_mode="messages" 가 토큰을 조각으로 못 받고
+        # '최종 답변 한 덩어리'만 흘립니다(통으로). True 면 토큰이 '다다다닥' 흘러갑니다.
+        streaming=True,
+        extra_body=extra_body,
+    )
 
 
 def build_chat_graph(
@@ -31,42 +99,76 @@ def build_chat_graph(
     tools=None,
     checkpointer=None,
     *,
+    provider: Optional[str] = None,
+    thinking: Optional[bool] = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
 ):
     """deepagents 로 langgraph 챗 그래프를 만들어 CompiledStateGraph 를 반환합니다.
 
-    모델은 OpenAI 호환 엔드포인트(실 OpenAI / 사내 vLLM / 로컬 Ollama 등)에 붙습니다.
+    provider 로 두 가지 백엔드를 고릅니다 (생각/thinking 끄는 방식이 서로 다름):
+      - "openai" (기본): ChatOpenAI — 실 OpenAI / 사내 vLLM 등 OpenAI 호환 /v1.
+            thinking 을 명시적으로 False 로 주면 자체 서빙(vLLM)에서 enable_thinking=False
+            로 생각을 끕니다. (기본 None 이면 아무 스위치도 안 보내 기존 동작 그대로.)
+      - "ollama": ChatOllama — Ollama 네이티브 /api/chat. API 키 불필요.
+            thinking 미지정이면 자동으로 끔(False) → 첫 토큰 즉시(가장 빠름).
+            langchain-ollama 패키지가 필요합니다.
 
-    파라미터 우선순위 (인자가 있으면 인자, 없으면 env):
-        api_key   : 인자 > OPENAI_API_KEY  env  (없으면 RuntimeError)
-        base_url  : 인자 > OPENAI_BASE_URL env  (없으면 OpenAI 기본 엔드포인트)
-        model     : 인자 > OPENAI_MODEL    env  (없으면 "gpt-4o-mini")
+    파라미터 우선순위 (인자 > env > 기본값):
+        provider : 인자 > CHAT_PROVIDER env > "openai"
+        thinking : 인자(None=미지정). None 이면 openai=스위치 안 보냄 / ollama=끔(False).
+                   False=생각 끔, True=생각 유지.
+        model    : 인자 > (ollama: OLLAMA_MODEL / openai: OPENAI_MODEL) > 기본값
+        base_url : 인자 > (ollama: OLLAMA_BASE_URL / openai: OPENAI_BASE_URL)
+        api_key  : 인자 > OPENAI_API_KEY  (openai 한정, 없으면 RuntimeError)
 
-    사내 vLLM 예시:
+    예시:
+        # 사내 vLLM
         build_chat_graph(api_key="...", base_url="https://vllm.사내/v1", model="<served-name>")
+        # 로컬 Ollama (생각 끄고 가장 빠르게)
+        build_chat_graph(provider="ollama", model="qwen3.5:0.8b")
 
     멀티턴은 checkpointer(기본 InMemorySaver) + 호출 시 thread_id 로 관리됩니다.
     """
-    api_key = api_key or os.environ.get("OPENAI_API_KEY")
-    base_url = base_url or os.environ.get("OPENAI_BASE_URL") or None
-    model = model or os.environ.get("OPENAI_MODEL") or "gpt-4o-mini"
-    if not api_key:
-        raise RuntimeError(
-            "OPENAI_API_KEY 가 필요합니다. 인자(api_key=...) 또는 환경변수(OPENAI_API_KEY) 로 "
-            "주입하세요. 코드/노트북에 키를 하드코딩하지 마세요."
+    provider = (provider or os.environ.get("CHAT_PROVIDER") or "openai").strip().lower()
+    if provider not in ("openai", "ollama"):
+        raise ValueError(
+            f"provider 는 'openai' 또는 'ollama' 여야 합니다 (받은 값: {provider!r})"
         )
+
+    # thinking 기본값: ollama 는 미지정(None)이면 끔(False)으로 — 첫 토큰이 즉시 나오게.
+    # openai 는 None 그대로 둬서 아무 스위치도 안 보냅니다(기존 vLLM 동작을 안 깨뜨림).
+    if thinking is None and provider == "ollama":
+        thinking = False
+
+    if provider == "ollama":
+        if api_key:
+            warnings.warn(
+                "provider='ollama' 는 api_key 가 필요 없습니다 — 전달한 키는 무시됩니다.",
+                UserWarning,
+            )
+        model = model or os.environ.get("OLLAMA_MODEL") or DEFAULT_OLLAMA_MODEL
+        base_url = base_url or os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL
+        # ChatOllama 는 루트 URL(.../api/chat 를 알아서 붙임)을 원합니다. OpenAI 처럼 ".../v1"
+        # 을 줬으면 떼어내고 알려줍니다(안 그러면 /v1/api/chat 으로 잘못 호출됨).
+        if base_url.rstrip("/").endswith("/v1"):
+            fixed = base_url.rstrip("/")[: -len("/v1")] or "/"
+            warnings.warn(
+                f"Ollama base_url 은 루트여야 합니다(.../v1 아님). '{base_url}' → '{fixed}' 로 보정합니다.",
+                UserWarning,
+            )
+            base_url = fixed
+    else:
+        api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        base_url = base_url or os.environ.get("OPENAI_BASE_URL") or None
+        model = model or os.environ.get("OPENAI_MODEL") or "gpt-4o-mini"
+
     from deepagents import create_deep_agent
-    from langchain_openai import ChatOpenAI
     from langgraph.checkpoint.memory import InMemorySaver
 
+    chat_model = _build_chat_model(provider, model, api_key, base_url, thinking)
     return create_deep_agent(
-        model=ChatOpenAI(
-            model=model,
-            base_url=base_url,
-            api_key=api_key,
-            temperature=0,
-        ),
+        model=chat_model,
         system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
         tools=list(tools) if tools else None,
         checkpointer=checkpointer or InMemorySaver(),

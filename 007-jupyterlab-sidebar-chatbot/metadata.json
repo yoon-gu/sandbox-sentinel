@@ -14,7 +14,8 @@
   "dependencies_used": [
     "deepagents (0.4.5)  # create_deep_agent → langgraph CompiledStateGraph",
     "langgraph (>=1.0.8, 작업 시 1.2.2)  # 그래프 런타임 + InMemorySaver 체크포인터",
-    "langchain-openai (→openai/httpx)  # ChatOpenAI — OpenAI 호환 (실 OpenAI / 사내 vLLM / Ollama)",
+    "langchain-openai (→openai/httpx)  # ChatOpenAI — provider='openai'(기본): 실 OpenAI / 사내 vLLM",
+    "langchain-ollama (선택)  # ChatOllama — provider='ollama': 로컬 Ollama 네이티브(생각 끄기·키 불필요)",
     "표준 라이브러리 http.server  # 얕은 HTTP 전송(server.py)",
     "@jupyterlab/application, ui-components / @lumino/widgets, messaging (^4/^2)  # 프론트(빌드시)",
     "markdown-it 14 / highlight.js 11 (cherry-pick) / dompurify 3  # 프론트 마크다운 자체 렌더 + sanitize"
@@ -23,7 +24,8 @@
     "shout-button-message 예제 패턴: Widget 상속 + 생성자 DOM + onAfterAttach/onBeforeDetach 라이프사이클 (예제의 bind 중복 해제 버그는 arrow 필드로 교정)",
     "우측 사이드바 탭으로 도킹되는 챗봇 위젯 (app.shell.add(widget, 'right'))",
     "두뇌 = deepagents 가 만든 langgraph 그래프 하나. 직접 만든 LLMAdapter/Mock/ChatBrain 클래스 제거 — langgraph 세계관으로 통일",
-    "모델은 ChatOpenAI 로 OpenAI 호환 엔드포인트(실 OpenAI / 사내 vLLM / 로컬 Ollama) 에 붙음. base_url/api_key/model 은 인자 또는 env(OPENAI_API_KEY/_BASE_URL/_MODEL) — 환경 전환 시 코드 변경 0",
+    "모델 백엔드 2종(provider): 'openai'=ChatOpenAI(실 OpenAI / 사내 vLLM, OpenAI 호환 /v1), 'ollama'=ChatOllama(Ollama 네이티브 /api/chat, 키 불필요). base_url/api_key/model 은 인자 또는 env(OPENAI_*/OLLAMA_*/CHAT_PROVIDER) — 환경 전환 시 코드 변경 0",
+    "생각(thinking) 토글: thinking=None(기본)·False(끔)·True(유지). 기본 None 은 openai=스위치 안 보냄(기존 vLLM 동작 유지)·ollama=자동 끔(첫 토큰 즉시·가장 빠름). openai 는 vLLM 의 chat_template_kwargs.enable_thinking, ollama 는 네이티브 reasoning 으로 처리. 실 OpenAI(api.openai.com/base_url 없음)엔 스위치 안 붙여 400 방지",
     "start_graph_server(api_key=, base_url=, model=, system_prompt=) 로 셀 한 줄에 사내 vLLM 으로 띄울 수 있음(인자가 env 보다 우선)",
     "멀티턴 = langgraph InMemorySaver + thread_id(=세션). 매 턴 새 메시지만 전달, 그래프가 기록 복원. /reset 은 thread 분기로 초기화",
     "응답 마크다운 자체 렌더 (markdown-it + highlight.js cherry-pick + DOMPurify) — JupyterLab jp-RenderedHTMLCommon 큰 여백 안 거치고 챗에 맞게 컴팩트. hljs 토큰 색은 --jp-mirror-editor-* 변수에 매핑해 라이트/다크 자동 적응",
@@ -35,9 +37,9 @@
   ],
   "limitations": [
     "온라인/개발 전용: OpenAI 호환 REST(실 OpenAI=외부망, 사내 vLLM=내부망) + openai/langchain-openai(httpx) 사용. 어느 쪽이든 폐쇄망 패키지 정책 확인 필요.",
-    "API 키 필수: 인자(api_key=...) 또는 환경변수(OPENAI_API_KEY) 로 주입(코드/노트북 하드코딩 금지). 사내 vLLM 이면 OPENAI_BASE_URL/MODEL 도.",
+    "API 키: provider='openai'(기본) 한정 필수 — 인자(api_key=...) 또는 OPENAI_API_KEY env(하드코딩 금지). 사내 vLLM 이면 OPENAI_BASE_URL/MODEL 도. provider='ollama' 는 키 불필요.",
     "tool calling 지원 모델 필요: deepagents 가 write_todos/write_file 등 도구를 부르기 때문에, 사내 vLLM 이면 모델이 OpenAI 호환 tool-call 포맷을 제대로 출력해야 단계가 정상(예: Llama-3.1-instruct, Qwen-함수콜링 템플릿). 안 되면 답변만 오고 steps 가 비어 보임.",
-    "wheel 무의존성: deepagents·langchain-openai 두 패키지를 직접 설치해야 동작 (langchain·langchain-anthropic 등은 deepagents 가 의존성으로 자동 설치).",
+    "wheel 무의존성: deepagents·langchain-openai 를 직접 설치해야 동작. provider='ollama' 면 langchain-ollama 도 추가 설치 (langchain·langchain-anthropic 등은 deepagents 가 자동 설치).",
     "localhost 전제: 브라우저 127.0.0.1 == 커널 기계(로컬/컨테이너/포트포워딩). 원격 호스트명 접속 시 미동작.",
     "매 커널 세션마다 start_graph_server() 한 줄 실행 필요. 포트 기본 8765 (server.py / handler.ts 상수 일치).",
     "single-file 아님: 다수 파일 + npm 빌드. 반입 단위는 wheel(.whl).",
@@ -52,6 +54,7 @@
     "install": "pip install jlab_sidebar_chatbot-*.whl  (또는 노트북 %pip install dist/*.whl)",
     "use": "브라우저 새로고침 → 💬 탭 / 노트북: start_graph_server() (env) 또는 start_graph_server(api_key=, base_url=, model=) (사내 vLLM 한 줄)",
     "verified_2026-05-28": "ChatOpenAI 로 build_chat_graph 구성 확인(인자/env 우선순위, RuntimeError 메시지). 실 endpoint 호출 검증은 사용자 환경에서.",
-    "note_2026-06-19": "SSE 토큰 스트리밍 추가(graph.stream_turn / server.py /chat/stream / src streamBrain). 파이썬은 py_compile 통과. 프론트(src/*.ts) 재빌드(jlpm install && build:prod)와 wheel 재빌드, 실 endpoint 스트리밍 동작/ demo.webp 재녹화는 사용자 dev 환경에서 필요(이 작업 환경엔 jlpm/node_modules 없음)."
+    "note_2026-06-19": "SSE 토큰 스트리밍 추가(graph.stream_turn / server.py /chat/stream / src streamBrain). 파이썬은 py_compile 통과. 프론트(src/*.ts) 재빌드(jlpm install && build:prod)와 wheel 재빌드, 실 endpoint 스트리밍 동작/ demo.webp 재녹화는 사용자 dev 환경에서 필요(이 작업 환경엔 jlpm/node_modules 없음).",
+    "note_2026-06-23": "Ollama 네이티브 연동 추가 — build_chat_graph(provider=, thinking=) 으로 ChatOpenAI(vLLM, OpenAI 호환)/ChatOllama(네이티브) 선택. thinking 기본 None(openai=무동작으로 기존 vLLM 호환 유지·ollama=자동 끔). 미사용 상수 DEFAULT_MODEL 제거. 검증: venv(py3.12)+로컬 Ollama qwen3.5:0.8b 로 provider 분기·thinking·실 OpenAI URL 가드·/v1 보정·스트리밍 등 18개 단위/기능 테스트 통과. demo.webp 는 Ollama 0.8b 실녹화(thinking off). langchain-ollama 는 ollama 사용 시 별도 설치. handler.ts/server.py 의 SSE 종료(done=끝 신호, Connection: close) 수정 포함."
   }
 }

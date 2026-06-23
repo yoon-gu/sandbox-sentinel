@@ -1,12 +1,14 @@
 # 007 - JupyterLab Sidebar Chatbot
 
-> **한 줄 요약**: JupyterLab **우측 사이드바**에 탭으로 뜨는 챗봇. 프론트엔드는 정통 TypeScript labextension, 두뇌는 **langgraph 그래프(deepagents)** + **OpenAI 호환 모델**(실 OpenAI / 사내 vLLM / 로컬 Ollama). 멀티턴은 langgraph 체크포인터(`thread_id`)가 관리하고, 응답은 **SSE 로 토큰 스트리밍**하며 마크다운으로 렌더, 도구·중간 단계는 접이식.
+> **한 줄 요약**: JupyterLab **우측 사이드바**에 탭으로 뜨는 챗봇. 프론트엔드는 정통 TypeScript labextension, 두뇌는 **langgraph 그래프(deepagents)** + **로컬 Ollama 또는 OpenAI 호환 모델**(실 OpenAI / 사내 vLLM). 멀티턴은 langgraph 체크포인터(`thread_id`)가 관리하고, 응답은 **SSE 로 토큰 스트리밍**하며 마크다운으로 렌더, 도구·중간 단계는 접이식.
 
 ## 데모
 
 ![JupyterLab 사이드바 챗봇 데모](demo.webp)
 
-> 실제 JupyterLab(4.5.6) 을 띄워 녹화한 화면입니다. ① 노트북에서 `start_graph_server()` 셀 한 번 실행 → ② 우측 **💬 Chatbot** 탭 → ③ 질문에 **마크다운 + 코드블록(복사 버튼)** 으로 답변 → ④ 도구를 쓰는 작업은 **`🔧 도구·중간 단계`** 를 클릭해 펼쳐 확인. (데모 모델은 로컬 Ollama `qwen3.5`, OpenAI 호환 엔드포인트로 연결 — env 만 바꾸면 사내 vLLM 동일)
+> 실제 JupyterLab(4.5.8) 에 띄워 Playwright 로 녹화한 화면입니다. ① `demo.ipynb`(설치·`start_graph_server()` 셀)를 열어 둔 상태에서 → ② 우측 **💬 Chatbot** 탭에 `파이썬으로 두 수를 더하는 함수 예시 보여줘` 입력 → ③ 답변이 **토큰 단위로 또르르(SSE 스트리밍)** 흘러오다 **마크다운 + 코드블록(복사 버튼)** 으로 마무리됩니다.
+>
+> 데모 두뇌는 **로컬 Ollama `qwen3.5:0.8b` 네이티브**(`start_graph_server(provider="ollama")`) — 생각(thinking)을 꺼서 **첫 토큰이 즉시** 나옵니다(`reasoning` 모델이지만 native `think:false` 로 OFF). `provider="openai"` + `api_key`/`base_url` 만 주면 실 OpenAI·사내 vLLM 으로 그대로 전환됩니다.
 
 ## ⚠️ 성격
 
@@ -75,13 +77,15 @@
 
 ```bash
 pip install deepagents langchain-openai
-#            └ 그래프      └ ChatOpenAI (OpenAI 호환 — 실 OpenAI / 사내 vLLM / Ollama)
+#            └ 그래프      └ ChatOpenAI (provider="openai" 기본 — 실 OpenAI / 사내 vLLM)
+pip install langchain-ollama   # (선택) provider="ollama" — 로컬 Ollama 네이티브(생각 끄기·키 불필요)
 ```
 
 | 구분 | 패키지 | 비고 |
 |---|---|---|
 | 두뇌 | `deepagents` | langgraph 그래프(create_deep_agent). langchain·langchain-anthropic 등은 deepagents 가 의존성으로 자동 설치 |
-| 모델 어댑터 | `langchain-openai`(→`openai`) | OpenAI 호환 — base_url 만 바꾸면 vLLM/Ollama |
+| 모델 어댑터 (openai) | `langchain-openai`(→`openai`) | `provider="openai"`(기본) — 실 OpenAI / 사내 vLLM(`/v1`) |
+| 모델 어댑터 (ollama) | `langchain-ollama` *(선택)* | `provider="ollama"` — Ollama 네이티브(`/api/chat`). 생각(thinking) 끄기 동작·키 불필요 |
 | 프론트(번들됨) | `@jupyterlab/application`·`ui-components`, `@lumino/widgets`·`messaging`, `markdown-it`·`highlight.js`(cherry-pick)·`dompurify` | 빌드 시. wheel 에 모두 번들됨 |
 
 ## 사용 예시
@@ -123,6 +127,17 @@ start_graph_server(
 )
 ```
 > 인자가 env 보다 우선합니다. 키를 노트북에 직접 적기 싫으면 `getpass.getpass()` 로 받으세요.
+
+**(c) 로컬 Ollama 로 — 가장 빠르게 (생각 끄고, 키 불필요)**:
+```python
+from jlab_sidebar_chatbot import start_graph_server
+start_graph_server(provider="ollama", model="qwen3.5:0.8b")
+# 사전: ollama 실행 + `pip install langchain-ollama`.
+# thinking 은 기본 꺼짐(첫 토큰 즉시). 켜려면 thinking=True (reasoning 지원 모델 한정).
+# 모델/주소는 OLLAMA_MODEL / OLLAMA_BASE_URL(루트 URL — .../v1 아님) 환경변수로도 지정 가능.
+```
+> 참고: `provider="openai"` + `base_url=".../v1"` 로 Ollama 의 OpenAI 호환 엔드포인트에 붙일 수도
+> 있지만, 그 경로로는 생각(thinking) 끄기가 안 먹혀 첫 토큰이 느립니다. 빠르게 쓰려면 `provider="ollama"`.
 
 ### 3) 시스템 프롬프트·도구 교체
 ```python

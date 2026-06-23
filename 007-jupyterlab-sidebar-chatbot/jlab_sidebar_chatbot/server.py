@@ -74,7 +74,12 @@ def _make_handler(graph):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
+            # 한 번의 턴만 흘리고 끝나는 일회성 스트림입니다. keep-alive 로 소켓을
+            # 열어두면, Content-Length 없는 응답을 받은 브라우저 fetch 가 '끝'을
+            # 인지하지 못해(EOF 없음) 최종 렌더가 멈춥니다. 그래서 응답 직후 닫아
+            # 깨끗한 EOF 를 보장합니다('done' 이벤트 + 연결 종료 = 이중 종료 신호).
+            self.send_header("Connection", "close")
+            self.close_connection = True
             # 일부 프록시가 버퍼링해 스트리밍이 끊겨 보이는 것 방지
             self.send_header("X-Accel-Buffering", "no")
             self._cors()
@@ -167,6 +172,8 @@ def start_graph_server(
     graph=None,
     host: str = "127.0.0.1",
     *,
+    provider: Optional[str] = None,
+    thinking: bool = False,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
@@ -177,11 +184,14 @@ def start_graph_server(
 
     두 가지 방식:
       1) graph 를 직접 만들어서 넘기기 — `start_graph_server(graph=my_graph)`
-      2) (편의) api_key/base_url/model/system_prompt 를 인자로 주거나, 환경변수
-         (OPENAI_API_KEY/_BASE_URL/_MODEL) 로 주입 → 내부에서 build_chat_graph 호출
+      2) (편의) provider/thinking/api_key/base_url/model/system_prompt 를 인자로 주거나,
+         환경변수(CHAT_PROVIDER/OPENAI_API_KEY/_BASE_URL/_MODEL/OLLAMA_MODEL 등)로
+         주입 → 내부에서 build_chat_graph 호출
 
-    사내 vLLM 한 줄 예시:
+    사내 vLLM 한 줄 예시(OpenAI 호환):
         start_graph_server(api_key="...", base_url="https://vllm.사내/v1", model="<name>")
+    로컬 Ollama 예시(네이티브 · 생각 끄고 가장 빠르게 · 키 불필요):
+        start_graph_server(provider="ollama", model="qwen3.5:0.8b")
 
     포트가 이미 우리 서버면 그대로 두고 알림, 다른 프로세스가 쓰면 우아하게 실패합니다.
     """
@@ -198,6 +208,8 @@ def start_graph_server(
     graph = graph or build_chat_graph(
         model=model,
         system_prompt=system_prompt,
+        provider=provider,
+        thinking=thinking,
         api_key=api_key,
         base_url=base_url,
         **graph_kwargs,

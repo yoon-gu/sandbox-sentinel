@@ -8,15 +8,18 @@ jlab_sidebar_chatbot — JupyterLab 우측 사이드바 챗봇
      → 노트북 셀에서 start_graph_server() 로 localhost 에 서빙. 직접 만든 LLM
         추상화(Adapter/Mock/Brain)는 없고, langgraph 그래프 하나가 두뇌입니다.
 
-⚠️ 두뇌는 OpenAI 호환 모델(실 OpenAI / 사내 vLLM / 로컬 Ollama 등)을 쓰는 '온라인/개발 전용'.
-   환경변수: OPENAI_API_KEY (필수) · OPENAI_BASE_URL (사내 vLLM /v1) · OPENAI_MODEL.
+⚠️ 두뇌는 '온라인/개발 전용'. 두 가지 백엔드(provider):
+   - provider="openai"(기본): OpenAI 호환 /v1 — 실 OpenAI / 사내 vLLM.
+       환경변수: OPENAI_API_KEY(필수) · OPENAI_BASE_URL(vLLM /v1) · OPENAI_MODEL.
+   - provider="ollama": Ollama 네이티브 — 키 불필요, 생각 끄기 동작(가장 빠름).
+       langchain-ollama 필요. 환경변수: CHAT_PROVIDER · OLLAMA_MODEL · OLLAMA_BASE_URL.
 
 생성: Code Conversion Agent
 라이선스: BSD-3-Clause
 """
 
 from ._version import __version__
-from .graph import DEFAULT_MODEL, build_chat_graph, reply, run_turn, stream_turn
+from .graph import build_chat_graph, reply, run_turn, stream_turn
 from .server import DEFAULT_PORT, start_graph_server, stop_graph_server
 
 
@@ -27,7 +30,6 @@ def _jupyter_labextension_paths():
 
 __all__ = [
     "__version__",
-    "DEFAULT_MODEL",
     "build_chat_graph",
     "reply",
     "run_turn",

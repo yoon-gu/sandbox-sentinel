@@ -97,6 +97,8 @@ export async function streamBrain<T>(
   const decoder = new TextDecoder();
   let buffer = '';
   let result: unknown = {};
+  // 'done' 이벤트가 이 스트림의 '끝' 신호입니다. 이게 오면 더 안 읽고 마칩니다.
+  let finished = false;
 
   // 한 SSE 프레임("event: x\ndata: y") 을 해석합니다.
   const handleFrame = (frame: string): void => {
@@ -117,6 +119,7 @@ export async function streamBrain<T>(
       onToken(payload.text ?? '');
     } else if (event === 'done') {
       result = payload;
+      finished = true; // 권위 있는 최종 결과 도착 — 루프를 끝낼 신호
     } else if (event === 'error') {
       throw new Error(payload.error || '스트리밍 오류');
     }
@@ -136,6 +139,17 @@ export async function streamBrain<T>(
       if (frame.trim()) {
         handleFrame(frame);
       }
+    }
+    // 'done' 을 받으면 연결이 닫히길 기다리지 않고 즉시 종료합니다.
+    // (서버가 keep-alive 로 소켓을 열어두면 reader.read() 가 영원히 안 끝나
+    //  최종 렌더가 멈추는 문제를 방지 — done 이 곧 끝 신호이므로 안전)
+    if (finished) {
+      try {
+        await reader.cancel();
+      } catch {
+        // 취소 중 오류는 무시 (이미 결과는 확보됨)
+      }
+      break;
     }
   }
 
