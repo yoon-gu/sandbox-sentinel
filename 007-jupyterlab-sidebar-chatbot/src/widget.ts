@@ -30,7 +30,8 @@ import yaml from 'highlight.js/lib/languages/yaml';
 import markdown from 'highlight.js/lib/languages/markdown';
 import plaintext from 'highlight.js/lib/languages/plaintext';
 
-import { requestBrain, streamBrain } from './handler';
+import { INotebookTracker } from '@jupyterlab/notebook';
+import { KernelChatClient } from './kernelClient';
 
 // 폐쇄망에서 자주 쓰는 언어만 등록 — 번들 크기 절약(전체는 700KB+, 이건 ~25KB).
 hljs.registerLanguage('python', python);
@@ -85,12 +86,6 @@ interface ChatStep {
   detail: string;
 }
 
-/** /chat 응답 형태. */
-interface ChatReply {
-  answer?: string;
-  steps?: ChatStep[];
-}
-
 /** 챗봇 사이드바 위젯. */
 export class ChatWidget extends Widget {
   private _sessionId: string;
@@ -98,9 +93,12 @@ export class ChatWidget extends Widget {
   private _input: HTMLTextAreaElement;
   private _sendButton: HTMLElement;
   private _newButton: HTMLElement;
+  private _client: KernelChatClient;
 
-  constructor() {
+  constructor(tracker: INotebookTracker) {
     super();
+    // 두뇌와의 통신은 '현재 노트북 커널'에 Comm 으로 붙어서 합니다(HTTP/포트 없음).
+    this._client = new KernelChatClient(tracker);
     this.addClass('jp-ChatWidget');
 
     // 위젯마다 고유 세션 id — 서버가 대화 맥락(thread)을 이 키로 구분합니다.
@@ -324,9 +322,9 @@ export class ChatWidget extends Widget {
     try {
       // 토큰이 오는 대로 평문으로 이어붙여 '실시간 미리보기' 를 보여줍니다.
       let streamed = '';
-      const reply = await streamBrain<ChatReply>(
-        'chat/stream',
-        { session_id: this._sessionId, message: text },
+      const reply = await this._client.stream(
+        this._sessionId,
+        text,
         token => {
           if (streamed === '') {
             pending.classList.remove('jp-mod-pending');
@@ -357,13 +355,10 @@ export class ChatWidget extends Widget {
     }
   }
 
-  /** 서버 세션을 초기화하고 화면을 비웁니다. */
+  /** 커널 세션을 초기화하고 화면을 비웁니다. */
   private async _resetChat(): Promise<void> {
     try {
-      await requestBrain<{ ok: boolean }>('reset', {
-        method: 'POST',
-        body: JSON.stringify({ session_id: this._sessionId })
-      });
+      await this._client.reset(this._sessionId);
     } catch (error) {
       console.error('reset 실패:', error);
     }

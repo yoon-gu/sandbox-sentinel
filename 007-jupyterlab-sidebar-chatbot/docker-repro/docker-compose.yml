@@ -1,0 +1,30 @@
+# 폐쇄망 Pod 재현: 8888'만' 노출(8765 는 일부러 막음) + JupyterHub base_url 흉내.
+#
+#   docker compose -f docker-repro/docker-compose.yml up -d --build
+#   열기: http://127.0.0.1:8888/user/<id>/<server>/lab?token=demo
+#   내리기: docker compose -f docker-repro/docker-compose.yml down
+services:
+  jlab:
+    build:
+      context: ..                    # 007 루트(여기 dist/*.whl 이 있어야 함)
+      dockerfile: docker-repro/Dockerfile
+    container_name: jlsc-repro
+    ports:
+      - "127.0.0.1:8888:8888"        # ✅ 8888만 publish. 8765 는 일부러 안 함 = ingress 재현
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # 컨테이너 → 호스트 Ollama 접근
+    environment:
+      # 컨테이너 안 커널의 두뇌가 호스트의 Ollama 를 쓰도록(당신의 qwen3.5:0.8b 재사용).
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    volumes:
+      - ..:/work                     # 007 폴더 마운트(노트북·소스 편집/참조)
+    command:
+      - jupyter
+      - lab
+      - --ip=0.0.0.0
+      - --port=8888
+      - --no-browser
+      - --allow-root
+      - --ServerApp.base_url=/user/<id>/<server>/   # JupyterHub URL 경로 흉내
+      - --ServerApp.root_dir=/work
+      - --ServerApp.token=demo                     # 데모용 고정 토큰

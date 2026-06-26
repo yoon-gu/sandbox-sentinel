@@ -9,6 +9,7 @@ import {
   JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
+import { INotebookTracker } from '@jupyterlab/notebook';
 import { LabIcon } from '@jupyterlab/ui-components';
 
 import { ChatWidget } from './widget';
@@ -26,11 +27,13 @@ const plugin: JupyterFrontEndPlugin<void> = {
   description: 'JupyterLab 우측 사이드바에 챗봇 탭을 추가합니다.',
   autoStart: true,
   // 마크다운은 위젯이 markdown-it 으로 자체 렌더 → IRenderMimeRegistry 불필요.
-  activate: (app: JupyterFrontEnd) => {
+  // 두뇌는 '현재 노트북 커널'에 Comm 으로 붙으므로 INotebookTracker 가 필요합니다.
+  requires: [INotebookTracker],
+  activate: (app: JupyterFrontEnd, tracker: INotebookTracker) => {
     console.log('JupyterLab extension jlab-sidebar-chatbot is activated!');
 
     // 챗봇 위젯을 만들어 우측 사이드바에 추가합니다(shout 예제와 동일한 패턴).
-    const widget = new ChatWidget();
+    const widget = new ChatWidget(tracker);
     widget.id = 'jlab-sidebar-chatbot-widget'; // Widget 은 id 가 필요합니다.
     widget.title.icon = new LabIcon({
       name: 'jlab-sidebar-chatbot:chat',

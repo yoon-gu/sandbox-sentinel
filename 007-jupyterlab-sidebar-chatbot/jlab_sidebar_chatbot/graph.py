@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import warnings
 from typing import Iterator, Optional
 
@@ -30,6 +31,75 @@ DEFAULT_OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11
 DEFAULT_SYSTEM_PROMPT = (
     "너는 폐쇄망 Jupyter 환경에서 동작하는 친절한 도우미야. 한국어로 간결하게 답해."
 )
+
+# ── base_url 이 None 일 때 돌려줄 고정 응답(stub) ─────────────────────────────
+# 실제 모델(OpenAI/vLLM/Ollama) 호출 없이 이 문자열만 돌려주는 더미 모드입니다.
+# 프론트엔드의 SSE 토큰 스트리밍·마크다운 렌더·코드블록 복사 버튼을 모델 없이
+# 점검할 때 씁니다. (마크다운 + 파이썬 코드블록을 일부러 포함해 렌더 결과를 보여줍니다.)
+FIXED_STUB_ANSWER = (
+    "안녕하세요! 저는 **고정 응답 모드(stub)** 로 동작 중인 데모 챗봇입니다.\n\n"
+    "`base_url=None` 으로 그래프를 만들면 실제 모델을 호출하지 않고 이 고정 문자열을 "
+    "돌려줍니다 — 프론트엔드의 SSE 스트리밍·마크다운 렌더·코드블록 복사 버튼을 모델 "
+    "없이 점검하기 위함입니다.\n\n"
+    "```python\n"
+    "def add(a, b):\n"
+    '    """두 수를 더해 돌려줍니다."""\n'
+    "    return a + b\n\n"
+    "print(add(2, 3))  # 5\n"
+    "```\n\n"
+    '실제 모델로 바꾸려면 `provider="ollama"` 로 호출하거나 `base_url`/`api_key` 를 '
+    "지정하세요."
+)
+
+
+class _StubMessage:
+    """더미 그래프가 주고받는 최소 메시지 객체.
+
+    run_turn / stream_turn / _split_turn 이 쓰는 속성(`type`, `content`, `tool_calls`,
+    `name`)만 흉내 냅니다 — langchain 메시지 클래스에 의존하지 않습니다.
+    """
+
+    def __init__(self, type: str, content: str):
+        self.type = type
+        self.content = content
+        self.tool_calls = []  # 더미는 도구를 부르지 않습니다
+        self.name = None
+
+
+class _StubGraph:
+    """LLM 없이 고정 문자열만 돌려주는 더미 그래프 (실제 모델 호출 0).
+
+    CompiledStateGraph 대신, run_turn(`invoke`) / stream_turn(`stream`) 이 호출하는
+    딱 두 메서드만 같은 시그니처로 흉내 냅니다. 멀티턴 상태는 없습니다(매 턴 같은 응답).
+    쓰임새: ① build_chat_graph(base_url=None) ② start_test_server() — 사이드바가
+    서버에 '연결되는지'만 점검(전송 경로는 실제와 동일, 두뇌만 더미).
+
+    answer 를 주면 그 문자열을, 안 주면 기본 고정 문자열(FIXED_STUB_ANSWER)을 씁니다.
+    """
+
+    def __init__(self, answer: Optional[str] = None):
+        self.answer = answer if answer is not None else FIXED_STUB_ANSWER
+
+    @staticmethod
+    def _last_user(inputs) -> str:
+        msgs = (inputs or {}).get("messages") or []
+        return msgs[-1].get("content", "") if msgs else ""
+
+    def invoke(self, inputs, config=None):
+        # 한 턴 = [사용자 입력, 고정 답변] 두 메시지로 구성합니다.
+        human = _StubMessage("human", self._last_user(inputs))
+        ai = _StubMessage("ai", self.answer)
+        return {"messages": [human, ai]}
+
+    def stream(self, inputs, config=None, stream_mode=None):
+        # 토큰 스트리밍 흉내: 고정 문자열을 작은 조각으로 흘립니다(messages 모드).
+        human = _StubMessage("human", self._last_user(inputs))
+        for piece in re.findall(r".{1,8}", self.answer, re.S):
+            yield ("messages", (_StubMessage("ai", piece), {}))
+        # 끝에 values 모드로 이번 턴 전체 메시지를 한 번 — stream_turn 이 여기서
+        # 권위 있는 answer/steps 를 계산합니다.
+        ai = _StubMessage("ai", self.answer)
+        yield ("values", {"messages": [human, ai]})
 
 
 def _build_chat_model(provider, model, api_key, base_url, thinking):
@@ -162,6 +232,13 @@ def build_chat_graph(
         api_key = api_key or os.environ.get("OPENAI_API_KEY")
         base_url = base_url or os.environ.get("OPENAI_BASE_URL") or None
         model = model or os.environ.get("OPENAI_MODEL") or "gpt-4o-mini"
+
+    # base_url 이 (인자·env 모두 비어) None 으로 확정되면 실제 모델을 만들지 않고
+    # 고정 문자열만 돌려주는 더미 그래프를 반환합니다. ⚠️ 임시 stub 모드 —
+    # 실제 OpenAI/vLLM/Ollama 를 쓰려면 base_url 을 명시하거나 provider="ollama" 로 호출하세요.
+    # (ollama 는 base_url 기본값이 채워지므로 이 분기에 걸리지 않습니다.)
+    if base_url is None:
+        return _StubGraph()
 
     from deepagents import create_deep_agent
     from langgraph.checkpoint.memory import InMemorySaver

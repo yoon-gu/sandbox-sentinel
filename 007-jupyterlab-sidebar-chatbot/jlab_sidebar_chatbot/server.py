@@ -230,6 +230,31 @@ def start_graph_server(
     return httpd
 
 
+def start_test_server(
+    port: int = DEFAULT_PORT,
+    host: str = "127.0.0.1",
+    answer: Optional[str] = None,
+) -> Optional[ThreadingHTTPServer]:
+    """LLM 호출 없이 자가진단용 테스트 서버를 host:port 에 엽니다 (실제 모델 호출 0).
+
+    build_chat_graph / deepagents / LLM 을 전혀 거치지 않고, 고정 문자열만 돌려주는
+    더미 그래프(_StubGraph)를 그대로 같은 전송 계층(라우트·CORS·SSE)에 얹습니다.
+    → 사이드바 💬 탭이 이 IP:포트에 '연결되는지'만 분리해서 점검할 때 쓰세요.
+      (응답 내용이 아니라 '연결'을 보는 용도. answer 로 회신 문구를 바꿀 수 있습니다.)
+
+    예) start_test_server()                      # 127.0.0.1:8765, 기본 고정 문구
+        start_test_server(answer="서버 연결 OK")  # 회신 문구 지정
+
+    중지는 stop_graph_server(port) 로 동일하게 합니다.
+    """
+    from .graph import _StubGraph
+
+    httpd = start_graph_server(graph=_StubGraph(answer), host=host, port=port)
+    if httpd is not None:
+        print(f"   (테스트 서버 — LLM 호출 없음. 응답은 고정 문자열. 중지: stop_graph_server({port}))")
+    return httpd
+
+
 def stop_graph_server(port: int = DEFAULT_PORT) -> None:
     """띄운 서버를 중지합니다."""
     httpd = _servers.pop(port, None)
