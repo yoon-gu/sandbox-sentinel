@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="ko">
+<!--
+  ============================================================================
+  Standalone Comm Chatbot — 원격 Jupyter 커널의 두뇌(007)에 붙는 독립 챗봇
+  ============================================================================
+
+  무엇인가:
+    007(jlab-sidebar-chatbot)의 두뇌는 '커널 안'에서 돌고, 사이드바는 Jupyter
+    Comm(커널 웹소켓)으로 그 두뇌와 대화합니다. 이 파일은 사이드바 대신 쓰는
+    '독립 클라이언트'입니다 — JupyterLab 없이, 그냥 브라우저로 이 HTML 하나만
+    열면 원격 Jupyter 서버의 커널에 붙어 같은 챗봇을 쓸 수 있습니다.
+
+  왜 single-file HTML 인가:
+    폐쇄망 반입은 파일이 적고 단순할수록 유리합니다. 외부 CDN·빌드 도구 없이
+    표준 브라우저 API(fetch / WebSocket / crypto.randomUUID)만 씁니다.
+    (CLAUDE.md: 영속화·반출물은 self-contained HTML. 외부 src/href 참조 금지.)
+
+  통신 경로 (007 의 사이드바와 완전히 동일한 프로토콜):
+      이 브라우저
+        │  ① REST: POST {base}api/kernels          (커널 하나 띄움)
+        │  ② WS  : {base}api/kernels/<id>/channels  (커널 메시징 채널)
+        ▼
+      Jupyter Server ──(프록시)──▶ 커널(Pod) : graph.py(두뇌) + comm.py
+                                       │  ③ execute_request 로 register_chatbot_comm() 실행
+                                       │  ④ comm_open(target='jlab_sidebar_chatbot')
+                                       │  ⑤ comm_msg {type:'message',...}
+                                       ▼
+                                    사내 LLM (Pod 안에서만 망 접근)
+
+    프론트→커널 : {type:'message', message, session_id} / {type:'reset', session_id}
+    커널→프론트 : {type:'ready'} / {type:'token', text}
+                  {type:'done', answer, steps} / {type:'error', error} / {type:'reset_ok'}
+
+  보안 메모:
+    여기 입력하는 토큰은 그 Jupyter 서버에서 '임의 코드 실행' 권한과 같습니다.
+    신뢰하는 서버에만 쓰고, 공용 PC 라면 사용 후 탭을 닫으세요. 이 페이지는
+    토큰을 localStorage 등 디스크에 저장하지 않고 메모리(JS 변수)에만 둡니다.
+
+  원격(다른 출처)에서 쓸 때:
+    이 HTML 을 Jupyter 서버 '바깥'(file:// 또는 다른 포트)에서 열면 CORS 가 막습니다.
+    그 경우 서버를 아래처럼 띄워야 합니다(토큰 인증이므로 쿠키/credentials 불필요):
+      jupyter lab --ServerApp.allow_origin='*'
+    같은 출처(이 파일을 그 Jupyter 의 /files/ 로 열기)면 CORS 설정이 필요 없습니다.
+-->
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Comm Chatbot (standalone)</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a212b; --line: #2b3543; --fg: #e6edf3;
+    --muted: #8b98a5; --accent: #4493f8; --user: #1f6feb; --ok: #3fb950; --err: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: flex; flex-direction: column;
+    font-family: -apple-system, "Segoe UI", "Noto Sans KR", sans-serif;
+    background: var(--bg); color: var(--fg); font-size: 14px;
+  }
+  /* ── 연결 패널 ── */
+  #setup { background: var(--panel); border-bottom: 1px solid var(--line); padding: 12px 16px; }
+  #setup summary { cursor: pointer; font-weight: 600; color: var(--accent); outline: none; }
+  .grid { display: grid; grid-template-columns: 140px 1fr; gap: 8px 12px; align-items: center; margin-top: 12px; }
+  .grid label { color: var(--muted); text-align: right; }
+  .grid input, .grid select {
+    background: var(--bg); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 9px; font: inherit; width: 100%;
+  }
+  .row { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+    padding: 8px 16px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+  #status { font-size: 13px; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; }
+  .dot.ok { background: var(--ok); } .dot.err { background: var(--err); } .dot.busy { background: #d29922; }
+  /* ── 대화 ── */
+  #log { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { max-width: 80%; padding: 10px 13px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .msg.user { align-self: flex-end; background: var(--user); color: #fff; border-bottom-right-radius: 3px; }
+  .msg.bot  { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 3px; }
+  .msg.sys  { align-self: center; color: var(--muted); font-size: 12.5px; background: transparent; max-width: 90%; text-align: center; }
+  .msg.err  { align-self: flex-start; color: var(--err); border: 1px solid var(--err); background: transparent; }
+  .msg.cursor::after { content: "▋"; color: var(--accent); animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 0%,50% { opacity: 1; } 50.01%,100% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .msg.cursor::after { animation: none; } }
+  details.steps { margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+  details.steps summary { cursor: pointer; }
+  details.steps .step { margin: 6px 0 0 8px; padding-left: 8px; border-left: 2px solid var(--line); }
+  details.steps .step b { color: var(--fg); }
+  /* ── 입력 ── */
+  #composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--panel); }
+  #composer textarea {
+    flex: 1; resize: none; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; font: inherit; line-height: 1.4; max-height: 140px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ① 연결 설정: 서버 주소 + 토큰 + 모델. 연결되면 자동으로 접힙니다. -->
+<details id="setup" open>
+  <summary>연결 설정</summary>
+  <div class="grid">
+    <label for="url">Jupyter 주소</label>
+    <input id="url" placeholder="http://127.0.0.1:8888/user/<id>/<server>/" />
+
+    <label for="token">토큰</label>
+    <input id="token" type="password" placeholder="서버 실행 시의 token (예: demo)" />
+
+    <label for="kernel">기존 커널 ID</label>
+    <input id="kernel" placeholder="(비우면 새 커널을 생성합니다)" />
+
+    <label for="provider">모델 제공자</label>
+    <select id="provider">
+      <option value="ollama">ollama (네이티브, 키 불필요)</option>
+      <option value="openai">openai (OpenAI 호환 / 사내 vLLM)</option>
+      <option value="stub">stub (모델 호출 0 · 전송 점검용)</option>
+    </select>
+
+    <label for="model">모델명</label>
+    <input id="model" value="qwen3.5:0.8b" placeholder="예: qwen3.5:0.8b" />
+
+    <!-- openai 일 때만 보이는 추가 입력 -->
+    <label for="baseurl" class="openai-only">base_url</label>
+    <input id="baseurl" class="openai-only" placeholder="사내 vLLM 이면 https://.../v1, 실 OpenAI 면 비움" />
+
+    <label for="apikey" class="openai-only">api_key</label>
+    <input id="apikey" class="openai-only" type="password" placeholder="OPENAI_API_KEY" />
+  </div>
+  <div class="row">
+    <button id="connect">연결</button>
+    <button id="disconnect" class="ghost" disabled>연결 해제</button>
+    <span id="status"><span class="dot"></span>대기 중</span>
+  </div>
+</details>
+
+<!-- ② 대화 로그 -->
+<div id="log" role="log" aria-live="polite"></div>
+
+<!-- ③ 입력 -->
+<div id="composer">
+  <textarea id="input" rows="1" aria-label="메시지 입력" placeholder="메시지를 입력하고 Enter (Shift+Enter 줄바꿈)" disabled></textarea>
+  <button id="send" disabled>보내기</button>
+  <button id="reset" class="ghost" disabled title="대화 기록 초기화">초기화</button>
+</div>
+
+<script>
+"use strict";
+// ============================================================================
+//  상태 — 한 페이지 = 한 연결. 메시지는 직렬로만 보냅니다(전송 중 입력 잠금).
+// ============================================================================
+const COMM_TARGET = "jlab_sidebar_chatbot";   // ⚠️ 007 comm.py / kernelClient.ts 와 일치
+
+const state = {
+  base: "",          // 정규화된 서버 베이스 (항상 / 로 끝남)
+  token: "",
+  ws: null,          // WebSocket
+  kernelId: null,
+  commId: null,      // 우리 comm 의 id
+  session: uuid(),   // Jupyter 메시징 session (헤더용)
+  chatSession: uuid(), // 챗봇 세션 id (커널의 thread_id 기반)
+  ready: false,      // comm 이 'ready' 를 받았는지
+  registerMsgId: null, // register 용 execute_request 의 msg_id
+  pending: null,     // 진행 중인 한 턴 { botEl, textEl, text }
+  createdKernel: false, // 이 클라이언트가 만든 커널인지(=disconnect 때 정리 대상)
+  closing: false,    // '의도적' 연결 해제 중인지(끊김 오류 표시 억제용)
+};
+
+const $ = (id) => document.getElementById(id);
+
+// ── 작은 유틸 ──────────────────────────────────────────────────────────────
+function uuid() { return crypto.randomUUID(); }
+
+// Jupyter 메시징 한 건의 봉투를 만듭니다(레거시 JSON 텍스트 프로토콜).
+function envelope(channel, msgType, content) {
+  return {
+    header: { msg_id: uuid(), session: state.session, username: "standalone",
+              date: new Date().toISOString(), msg_type: msgType, version: "5.3" },
+    parent_header: {}, metadata: {}, content: content, buffers: [], channel: channel,
+  };
+}
+
+// 사용자가 붙여넣는 주소는 .../lab?token=... 처럼 지저분할 수 있어 베이스로 정규화.
+//   - 끝의 lab/tree/notebooks 등 UI 경로를 떼고
+//   - 쿼리의 token 이 있으면 토큰 칸이 비었을 때 채워주고
+//   - 항상 / 로 끝나게 만듭니다.
+function normalize(rawUrl, rawToken) {
+  const u = new URL(rawUrl.trim());
+  const tokenFromUrl = u.searchParams.get("token") || "";
+  let path = u.pathname.replace(/\/(lab|tree|notebooks|doc)(\/.*)?$/, "/");
+  if (!path.endsWith("/")) path += "/";
+  return { base: u.origin + path, token: (rawToken.trim() || tokenFromUrl) };
+}
+
+function httpUrl(apiPath) { return state.base + apiPath; }      // base 는 / 로 끝남
+function wsUrl(apiPath) {
+  const u = new URL(state.base + apiPath);
+  u.protocol = (u.protocol === "https:") ? "wss:" : "ws:";
+  if (state.token) u.searchParams.set("token", state.token);    // WS 는 헤더를 못 붙여 쿼리로
+  const xsrf = getCookie("_xsrf");
+  if (xsrf) u.searchParams.set("_xsrf", xsrf);                  // JupyterHub 대응(아래 주석)
+  return u.toString();
+}
+function getCookie(name) {
+  const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+  return m ? decodeURIComponent(m[1]) : "";
+}
+function authHeaders() {
+  // 순수 jupyter_server 는 토큰 인증이면 XSRF 검사를 건너뜁니다(_xsrf 불필요).
+  // 다만 실제 JupyterHub single-user 서버는 토큰이어도 _xsrf 를 요구할 수 있어,
+  // 같은 출처라면 _xsrf 쿠키를 읽어 헤더로 함께 보냅니다(두 세대 모두 만족).
+  // ponytail: 교차 출처(file://·다른 포트) JupyterHub 는 JS 가 _xsrf 쿠키를 못 읽어
+  //           미지원 — 그 경우 이 HTML 을 그 Jupyter 의 /files/(같은 출처)로 여세요.
+  const h = state.token ? { Authorization: "token " + state.token } : {};
+  const xsrf = getCookie("_xsrf");
+  if (xsrf) h["X-XSRFToken"] = xsrf;
+  return h;
+}
+
+// ── 화면 ────────────────────────────────────────────────────────────────────
+function setStatus(text, kind) {
+  $("status").innerHTML = `<span class="dot ${kind || ""}"></span>` + escapeHtml(text);
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function addMsg(cls, text) {
+  const el = document.createElement("div");
+  el.className = "msg " + cls;
+  el.textContent = text;
+  $("log").appendChild(el);
+  $("log").scrollTop = $("log").scrollHeight;
+  return el;
+}
+function renderSteps(botEl, steps) {
+  if (!steps || !steps.length) return;
+  const d = document.createElement("details");
+  d.className = "steps";
+  const sum = document.createElement("summary");
+  sum.textContent = `중간 단계 ${steps.length}개`;
+  d.appendChild(sum);
+  for (const s of steps) {
+    const row = document.createElement("div");
+    row.className = "step";
+    row.innerHTML = `<b>${escapeHtml(s.label || s.type || "")}</b>` +
+                    (s.detail ? `<br>${escapeHtml(s.detail)}` : "");
+    d.appendChild(row);
+  }
+  botEl.appendChild(d);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+// ── 연결 잠금/해제 ───────────────────────────────────────────────────────────
+function setConnectedUI(connected) {
+  $("connect").disabled = connected;
+  $("disconnect").disabled = !connected;
+  $("input").disabled = !connected;
+  $("send").disabled = !connected;
+  $("reset").disabled = !connected;
+  for (const f of ["url", "token", "kernel", "provider", "model", "baseurl", "apikey"])
+    $(f).disabled = connected;
+  if (connected) $("setup").open = false;
+}
+
+// ============================================================================
+//  커널 쪽에서 실행할 register 코드 — UI 선택을 그대로 파이썬 한 줄로.
+// ============================================================================
+function buildRegisterCode() {
+  const provider = $("provider").value;
+  const model = $("model").value.trim();
+  // 파이썬 문자열 리터럴 안전 인용(역슬래시/작은따옴표/개행 이스케이프).
+  const py = (s) => "'" + String(s)
+    .replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+    .replace(/\n/g, "\\n").replace(/\r/g, "\\r") + "'";
+  let args;
+  if (provider === "stub") {
+    // base_url=None → graph.py 의 고정 응답 그래프(모델·키 불필요). 전송 경로만 점검.
+    args = "base_url=None";
+  } else if (provider === "ollama") {
+    args = `provider='ollama'` + (model ? `, model=${py(model)}` : "");
+  } else { // openai
+    const baseurl = $("baseurl").value.trim();
+    const apikey = $("apikey").value.trim();
+    args = `provider='openai'`
+         + (model ? `, model=${py(model)}` : "")
+         + (baseurl ? `, base_url=${py(baseurl)}` : "")
+         + (apikey ? `, api_key=${py(apikey)}` : "");
+  }
+  return "from jlab_sidebar_chatbot import register_chatbot_comm\n"
+       + `register_chatbot_comm(${args})`;
+}
+
+// ============================================================================
+//  연결 흐름:  커널 확보 → WS open → register 실행 → comm_open → ready
+// ============================================================================
+async function connect() {
+  // 연결 시도 중 재진입(더블클릭) 차단 — 안 막으면 커널 중복 생성 + WS 고아.
+  $("connect").disabled = true;
+  state.closing = false;
+  state.pending = null;
+  state.createdKernel = false;
+  try {
+    const rawUrl = $("url").value.trim();
+    if (!rawUrl) throw new Error("주소를 입력하세요.");
+    let norm;
+    try { norm = normalize(rawUrl, $("token").value); }
+    catch (_) { throw new Error("주소 형식이 올바르지 않습니다: " + rawUrl); }
+    if (!norm.token) throw new Error("토큰을 입력하세요(서버 인증 + XSRF 우회).");
+    state.base = norm.base;
+    state.token = norm.token;
+    state.ready = false;
+    state.commId = uuid();
+
+    // ① 커널 확보: 기존 ID 가 있으면 쓰고, 없으면 새로 생성.
+    const givenKernel = $("kernel").value.trim();
+    if (givenKernel) {
+      state.kernelId = givenKernel;
+      state.createdKernel = false;   // 남의 커널 — disconnect 때 지우지 않음
+      setStatus("기존 커널에 연결 중…", "busy");
+    } else {
+      setStatus("커널 생성 중…", "busy");
+      const res = await fetch(httpUrl("api/kernels"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ name: "python3" }),
+      });
+      if (!res.ok) throw new Error(`커널 생성 실패: HTTP ${res.status} ${await res.text().catch(() => "")}`);
+      state.kernelId = (await res.json()).id;
+      state.createdKernel = true;    // 우리가 만든 커널 — disconnect 때 정리
+    }
+
+    // ② 커널 채널 WS 열기.
+    setStatus("커널 채널 연결 중…", "busy");
+    openWebSocket();
+  } catch (err) {
+    $("connect").disabled = false;   // 실패 — 다시 시도 가능하게
+    setStatus("연결 실패: " + err.message, "err");
+    addMsg("err", "연결 실패: " + err.message);
+  }
+}
+
+function openWebSocket() {
+  const ws = new WebSocket(wsUrl(`api/kernels/${state.kernelId}/channels`));
+  state.ws = ws;
+
+  ws.onopen = () => {
+    // ③ register_chatbot_comm() 실행 — 이 커널에 comm target 을 심습니다.
+    setStatus("두뇌 등록 중(register_chatbot_comm)…", "busy");
+    const msg = envelope("shell", "execute_request", {
+      code: buildRegisterCode(), silent: false, store_history: false,
+      user_expressions: {}, allow_stdin: false, stop_on_error: true,
+    });
+    state.registerMsgId = msg.header.msg_id;
+    ws.send(JSON.stringify(msg));
+  };
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); }
+    catch (_) { return; }   // 비-JSON/바이너리 프레임 무시 (파싱만 try — 핸들러 예외는 안 삼킴)
+    onKernelMessage(msg);
+  };
+  ws.onerror = () => setStatus("WebSocket 오류 (주소/토큰/CORS 확인)", "err");
+  ws.onclose = () => {
+    state.ready = false;
+    // 진행 중이던 턴 정리 — 안 비우면 재연결 후 sendMessage 가드가 영구 early-return.
+    if (state.pending) { state.pending.botEl.remove(); state.pending = null; }
+    setConnectedUI(false);                 // 입력 잠금 + connect 버튼 재활성
+    if (!state.closing) setStatus("연결 끊김", "err");
+    state.closing = false;
+  };
+}
+
+// 커널 → 우리 메시지 1건 처리. 우리가 쓰는 것만 고르고 나머지는 무시.
+function onKernelMessage(msg) {
+  const ch = msg.channel;
+  const mt = msg.header && msg.header.msg_type;
+  const content = msg.content || {};
+  const parentId = msg.parent_header && msg.parent_header.msg_id;
+
+  // (a) register 결과 — shell execute_reply.
+  if (ch === "shell" && mt === "execute_reply" && parentId === state.registerMsgId) {
+    if (content.status === "ok") {
+      // ④ target 이 생겼으니 comm 을 엽니다.
+      setStatus("comm 여는 중…", "busy");
+      const open = envelope("shell", "comm_open",
+        { comm_id: state.commId, target_name: COMM_TARGET, data: {} });
+      state.ws.send(JSON.stringify(open));
+    } else {
+      // register 가 에러 — iopub 'error' 가 이미 트레이스백을 보여줬을 것.
+      setStatus("두뇌 등록 실패 (register_chatbot_comm 오류)", "err");
+    }
+    return;
+  }
+
+  // (b) register 중 커널 출력/에러를 그대로 보여줌(import 실패 등 진단).
+  if (parentId === state.registerMsgId && ch === "iopub") {
+    if (mt === "stream" && content.text) addMsg("sys", content.text.trim());
+    if (mt === "error") addMsg("err",
+      `${content.ename}: ${content.evalue}\n패키지(jlab_sidebar_chatbot)가 이 커널에 설치돼 있나요?`);
+    return;
+  }
+
+  // (c) comm 닫힘 — target 미등록(있어선 안 되지만)이거나 커널이 comm 을 닫음.
+  if (ch === "iopub" && mt === "comm_close" && content.comm_id === state.commId) {
+    if (!state.ready) {
+      setStatus("comm 이 즉시 닫힘 — target 미등록", "err");
+      addMsg("err", `comm target '${COMM_TARGET}' 가 없습니다. 커널에 007 패키지가 설치돼 있는지 확인하세요.`);
+    }
+    return;
+  }
+
+  // (d) 우리 comm 으로 온 메시지 — 진짜 챗봇 페이로드.
+  if (ch === "iopub" && mt === "comm_msg" && content.comm_id === state.commId) {
+    onCommData(content.data || {});
+    return;
+  }
+}
+
+// comm 페이로드(= 007 comm.py 가 comm.send 로 보낸 dict) 처리.
+function onCommData(data) {
+  const type = data.type;
+  if (type === "ready") {
+    state.ready = true;
+    setConnectedUI(true);
+    setStatus(`연결됨 · 커널 ${state.kernelId.slice(0, 8)}`, "ok");
+    addMsg("sys", "두뇌에 연결되었습니다. 대화를 시작하세요.");
+    return;
+  }
+  if (type === "reset_ok") {
+    addMsg("sys", "대화 기록을 초기화했습니다.");
+    return;
+  }
+  if (!state.pending) return;   // 진행 중 턴이 없으면 이하 무시(레이스 방지)
+
+  if (type === "token") {
+    state.pending.text += String(data.text || "");
+    state.pending.textEl.textContent = state.pending.text;
+    $("log").scrollTop = $("log").scrollHeight;
+  } else if (type === "done") {
+    const p = state.pending;
+    p.textEl.classList.remove("cursor");
+    // done.answer 가 오면 그것으로 최종 확정(스트리밍 토큰과 보통 동일).
+    if (data.answer) p.textEl.textContent = data.answer;
+    renderSteps(p.botEl, data.steps);
+    state.pending = null;
+    setTurnLock(false);
+  } else if (type === "error") {
+    if (state.pending) state.pending.botEl.remove();
+    state.pending = null;
+    addMsg("err", "오류: " + (data.error || "알 수 없는 오류"));
+    setTurnLock(false);
+  }
+}
+
+// ── 한 턴 보내기 ─────────────────────────────────────────────────────────────
+function setTurnLock(busy) {
+  $("send").disabled = busy;
+  $("input").disabled = busy;
+  if (!busy) $("input").focus();
+}
+function sendMessage() {
+  const text = $("input").value.trim();
+  if (!text || !state.ready || state.pending) return;
+  $("input").value = "";
+  $("input").style.height = "auto";
+  addMsg("user", text);
+
+  // 빈 봇 버블 + 커서 — 토큰이 들어오면 여기 채워집니다.
+  const botEl = addMsg("bot", "");
+  botEl.classList.add("cursor"); // (커서는 텍스트 노드 대신 버블에)
+  const textEl = botEl;          // 토큰을 직접 이 엘리먼트에 씀
+  state.pending = { botEl, textEl, text: "" };
+  setTurnLock(true);
+
+  const msg = envelope("shell", "comm_msg", {
+    comm_id: state.commId,
+    data: { type: "message", message: text, session_id: state.chatSession },
+  });
+  state.ws.send(JSON.stringify(msg));
+}
+function resetChat() {
+  if (!state.ready || state.pending) return;
+  const msg = envelope("shell", "comm_msg", {
+    comm_id: state.commId,
+    data: { type: "reset", session_id: state.chatSession },
+  });
+  state.ws.send(JSON.stringify(msg));
+}
+function disconnect() {
+  state.closing = true;   // onclose 가 '연결 끊김(err)' 로 덮어쓰지 않게
+  // 우리가 만든 커널은 정리(자원 누수 방지). 사용자가 직접 넣은 커널은 건드리지 않음.
+  if (state.createdKernel && state.kernelId) {
+    fetch(httpUrl("api/kernels/" + state.kernelId), { method: "DELETE", headers: authHeaders() })
+      .catch(() => { /* 정리 실패는 무시 — idle culling 이 결국 회수 */ });
+  }
+  if (state.ws) state.ws.close();
+  state.ws = null;
+  state.ready = false;
+  state.pending = null;
+  setConnectedUI(false);
+  setStatus("연결 해제됨", "");
+}
+
+// ── 이벤트 배선 ──────────────────────────────────────────────────────────────
+$("connect").addEventListener("click", connect);
+$("disconnect").addEventListener("click", disconnect);
+$("send").addEventListener("click", sendMessage);
+$("reset").addEventListener("click", resetChat);
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+$("input").addEventListener("input", (e) => {   // 입력창 자동 높이
+  e.target.style.height = "auto";
+  e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px";
+});
+// provider 가 openai 일 때만 base_url/api_key 칸 표시.
+function syncProviderFields() {
+  const show = $("provider").value === "openai";
+  for (const el of document.querySelectorAll(".openai-only"))
+    el.style.display = show ? "" : "none";
+}
+$("provider").addEventListener("change", syncProviderFields);
+syncProviderFields();
+</script>
+</body>
+</html>
