@@ -41,6 +41,23 @@
 > **폐쇄망 정책**: `requirements.txt` 의 패키지/버전은 [`environment-adapter` Skill](.claude/skills/environment-adapter/stacks/default.yaml) 의 허용 목록과 일치해야 합니다. 사내 미러에 등록되지 않은 패키지가 있으면 Skill 에 알려주세요.
 > **torch / transformers 제외**: 002 의 `hf_trainer_demo.py` 만 필요로 하므로 통일 `.venv` 에서 의도적으로 제외했습니다 (~5GB 절감). 002 의 풀 데모를 돌리려면 별도 설치하세요.
 
+## 검증 환경 — 표준 pod (폐쇄망 재현)
+
+모든 변환물(001~008)을 **하나의 폐쇄망 Pod 재현 환경**에서 검증·녹화합니다. ingress(8888)만 노출하고 jupyter 기본 url 을 쓰는 single-user JupyterLab 컨테이너로, 실제 사내 Pod 토폴로지를 흉내냅니다 (커널에는 오직 Jupyter 프로토콜로만 접근 — 007/008 의 Comm 전송이 동작하는 유일한 경로).
+
+```bash
+# 표준 pod 기동 (007 의 docker-repro — 리포 루트 전체를 /work 로 마운트)
+docker compose -f 007-jupyterlab-sidebar-chatbot/docker-repro/docker-compose.yml up -d --build
+#   열기: http://127.0.0.1:8888/lab?token=demo
+
+# 데모 녹화 (호스트 .venv 의 Playwright + libwebp)
+.venv/bin/python 007-jupyterlab-sidebar-chatbot/docker-repro/rec_008.py   # 도구별 rec_NNN.py
+```
+
+- **녹화 하니스**: `007-jupyterlab-sidebar-chatbot/docker-repro/pw_record.py` (Playwright chromium → retina webp) + 도구별 `rec_001.py`~`rec_008.py`. 각 폴더의 `demo.webp` 가 이 pod 안에서 재녹화된 결과입니다.
+- **모달리티**: 노트북(001·005·007), HTML 대시보드(002), 브라우저 HTML(008), xterm 터미널 TUI(003·004·006). TUI 는 canvas 라 headed 크로미움으로 캡처합니다.
+- 이미지는 deepagents(langgraph 1.2.x) 와 나머지 도구 의존성을 함께 담습니다 (`requirements.txt` 의 langgraph 1.0.10 핀은 deepagents 호환을 위해 제외 — 알려진 트레이드오프).
+
 ## 리포 구조
 
 ```
