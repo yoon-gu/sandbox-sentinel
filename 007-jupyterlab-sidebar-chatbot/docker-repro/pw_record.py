@@ -25,8 +25,12 @@ SCALE = 2
 
 
 @contextlib.contextmanager
-def recorder(out_dir: str | Path, *, viewport=VIEWPORT, scale=SCALE):
+def recorder(out_dir: str | Path, *, viewport=VIEWPORT, scale=SCALE, headless=True):
     """chromium 을 영상 녹화 모드로 띄우고 page 를 yield. 종료 시 webm 경로를 반환.
+
+    headless=True: DOM/HTML 페이지(노트북·대시보드·사이드바·chat.html)용 — 안정.
+    headless=False: xterm 터미널 TUI 용. xterm 은 canvas 렌더라 old-headless 에선
+        백지로 캡처됨 → headed 로 띄워야 화면이 잡힌다(macOS 에 창이 잠깐 뜸).
 
     사용:
         with recorder("/tmp/rec") as (page, get_video):
@@ -37,7 +41,7 @@ def recorder(out_dir: str | Path, *, viewport=VIEWPORT, scale=SCALE):
     out.mkdir(parents=True, exist_ok=True)
     holder = {}
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--no-sandbox"])
+        browser = p.chromium.launch(headless=headless, args=["--no-sandbox"])
         context = browser.new_context(
             viewport=viewport, device_scale_factor=scale,
             record_video_dir=str(out), record_video_size=viewport,
@@ -120,6 +124,36 @@ def jlab_run_first_code_cell(page: Page):
     cell = page.locator(".jp-Notebook .jp-CodeCell").first
     cell.click()
     page.keyboard.press("Shift+Enter")
+
+
+def jlab_open_terminal(page: Page):
+    """JupyterLab Launcher 에서 새 터미널(xterm)을 열고 포커스를 준다.
+
+    터미널 안에서 TUI(textual/prompt_toolkit)를 실행해 녹화하기 위함. xterm 은
+    캔버스 렌더라 DOM 단언 대신 키 입력(type/press)으로만 구동한다.
+    """
+    page.goto(f"{BASE}lab?reset&token={TOKEN}", wait_until="domcontentloaded")
+    page.wait_for_selector(".jp-Launcher", timeout=60_000)
+    # Launcher 의 'Terminal' 카드 클릭
+    card = page.locator(".jp-LauncherCard", has_text="Terminal")
+    card.first.click()
+    page.wait_for_selector(".jp-Terminal .xterm", timeout=30_000)
+    page.wait_for_timeout(1500)
+    page.locator(".jp-Terminal .xterm-screen").first.click()  # 포커스
+    page.wait_for_timeout(500)
+
+
+def term_send(page: Page, text: str, *, enter=True, settle_ms=800):
+    """포커스된 xterm 에 텍스트를 입력(+Enter).
+
+    ⚠️ 클릭하지 않습니다 — 풀스크린 Textual/prompt_toolkit 앱은 마우스 클릭을 받아
+    입력 포커스를 딴 위젯으로 옮겨버립니다. 터미널은 jlab_open_terminal 의 최초 클릭
+    이후 포커스를 유지하므로, 이후엔 키만 보냅니다.
+    """
+    page.keyboard.type(text, delay=30)
+    if enter:
+        page.keyboard.press("Enter")
+    page.wait_for_timeout(settle_ms)
 
 
 if __name__ == "__main__":
