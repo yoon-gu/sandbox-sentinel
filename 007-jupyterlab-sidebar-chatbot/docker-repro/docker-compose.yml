@@ -1,7 +1,13 @@
-# 폐쇄망 Pod 재현: 8888'만' 노출(8765 는 일부러 막음) + JupyterHub base_url 흉내.
+# 폐쇄망 Pod 재현: ingress(8888)'만' 노출 + jupyter 기본 url(base_url 없음).
+#
+#   컨테이너 = Pod, 호스트 브라우저 = 당신 PC, publish 된 8888 = ingress.
+#   커널의 직접 포트는 publish 하지 않습니다 — 브라우저는 오직 Jupyter 프로토콜
+#   (api/kernels/<id>/channels WebSocket)로만 커널에 닿습니다. 이것이 폐쇄망 Pod
+#   에서 사이드바(007)/standalone(008)이 두뇌에 붙는 유일한 경로를 재현합니다.
+#   (sandbox 표준 검증 env: 모든 변환물을 이 pod 안에서 검증·녹화)
 #
 #   docker compose -f docker-repro/docker-compose.yml up -d --build
-#   열기: http://127.0.0.1:8888/user/<id>/<server>/lab?token=demo
+#   열기: http://127.0.0.1:8888/lab?token=demo
 #   내리기: docker compose -f docker-repro/docker-compose.yml down
 services:
   jlab:
@@ -10,14 +16,14 @@ services:
       dockerfile: docker-repro/Dockerfile
     container_name: jlsc-repro
     ports:
-      - "127.0.0.1:8888:8888"        # ✅ 8888만 publish. 8765 는 일부러 안 함 = ingress 재현
+      - "127.0.0.1:8888:8888"        # ✅ ingress 8888 만 publish (pod 재현 — 커널 포트는 비공개)
     extra_hosts:
       - "host.docker.internal:host-gateway"   # 컨테이너 → 호스트 Ollama 접근
     environment:
-      # 컨테이너 안 커널의 두뇌가 호스트의 Ollama 를 쓰도록(당신의 qwen3.5:0.8b 재사용).
+      # 컨테이너 안 커널의 두뇌가 호스트의 Ollama 를 쓰도록.
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
     volumes:
-      - ..:/work                     # 007 폴더 마운트(노트북·소스 편집/참조)
+      - ../..:/work                  # 리포 루트 전체 마운트 (001~008 모든 변환물 검증·녹화)
     command:
       - jupyter
       - lab
@@ -25,6 +31,9 @@ services:
       - --port=8888
       - --no-browser
       - --allow-root
-      - --ServerApp.base_url=/user/<id>/<server>/   # JupyterHub URL 경로 흉내
       - --ServerApp.root_dir=/work
-      - --ServerApp.token=demo                     # 데모용 고정 토큰
+      - --ServerApp.token=demo       # 데모용 고정 토큰
+      # base_url 미지정 = jupyter 기본 url('/'). JupyterHub 경로 흉내 제거.
+      # /files/ 로 서빙되는 008 chat.html 은 CSP 'sandbox allow-scripts'(opaque origin)라
+      # REST/WS 가 cross-origin(Origin: null) → 커널 채널 WS check_origin 통과 위해 필요.
+      - "--ServerApp.allow_origin=*"

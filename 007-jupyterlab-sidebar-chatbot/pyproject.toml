@@ -42,6 +42,11 @@ exclude = [".github", "node_modules", "lib", "demo.ipynb"]
 exclude = ["**/.ipynb_checkpoints", "**/__pycache__"]
 
 [tool.hatch.build.targets.wheel.shared-data]
+# labextension 디렉토리(build:prod 산출물)와 루트 install.json 을 각각 매핑합니다.
+# ⚠️ build:prod 는 labextension/ 를 깨끗이 재생성하며 install.json 을 거기에 두지
+#    않으므로, install.json 은 반드시 아래 줄로 따로 넣어야 합니다.
+#    (과거: 옛 빌드가 labextension/install.json 을 남긴 채 아래 줄도 있으면 같은
+#     경로 중복으로 hatchling 빌드 실패 → 항상 build:prod 로 깨끗이 빌드한 뒤 패키징할 것.)
 "jlab_sidebar_chatbot/labextension" = "share/jupyter/labextensions/jlab-sidebar-chatbot"
 "install.json" = "share/jupyter/labextensions/jlab-sidebar-chatbot/install.json"
 
