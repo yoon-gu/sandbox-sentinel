@@ -101,7 +101,9 @@ def jlab_open_notebook(page: Page, nb_path: str, *, kernel_wait=8000):
 
     nb_path: root_dir(=리포루트) 기준 상대경로. 예: 001-.../demo.ipynb
     """
-    page.goto(f"{BASE}lab/tree/{nb_path}?token={TOKEN}", wait_until="domcontentloaded")
+    # ?reset = 저장된 워크스페이스(이전에 열려있던 탭/레이아웃)를 비우고 시작.
+    # 안 하면 직전 녹화의 노트북 탭이 복원돼 두 탭이 겹치고 셀 선택이 엉킨다.
+    page.goto(f"{BASE}lab/tree/{nb_path}?reset&token={TOKEN}", wait_until="domcontentloaded")
     page.wait_for_selector(".jp-Notebook", timeout=60_000)
     # 'Select Kernel' 등 다이얼로그가 뜨면 기본값으로 통과
     try:
