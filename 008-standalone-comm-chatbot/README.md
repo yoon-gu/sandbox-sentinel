@@ -28,7 +28,7 @@
 - **자동 등록** — 사용자가 노트북 셀에서 `register_chatbot_comm()` 을 직접 칠 필요 없음. 클라이언트가 커널에 `execute_request` 로 알아서 실행.
 - **007 과 동일한 comm 프로토콜** — `{message|reset}` 보내고 `{ready|token|done|error|reset_ok}` 받음. 토큰 스트리밍 + 중간 단계 접이식 표시.
 - **모델 제공자 선택** — `ollama`(키 불필요) / `openai`(사내 vLLM `base_url`·`api_key` 입력) / `stub`(모델 호출 0, 전송 경로만 점검).
-- **원격/JupyterHub 대응** — `base_url`(예: `/user/<id>/<server>/`)까지 포함한 주소 정규화, `http→ws` 스킴 변환, 토큰 인증.
+- **주소 자동 정리** — `lab?token=…` 같은 주소를 붙여넣어도 베이스로 정규화, `http→ws` 스킴 변환, 토큰 인증.
 
 ---
 
@@ -39,7 +39,7 @@
    │  ① POST {base}api/kernels            (커널 생성)        헤더 Authorization: token <t>
    │  ② WS   {base}api/kernels/<id>/channels?token=<t>      (커널 메시징 채널)
    ▼
-Jupyter Server ──(프록시: JupyterHub base_url)──▶ 커널(Pod)
+Jupyter Server ──(프록시)──▶ 커널(Pod)
                                                     │  ③ execute_request → register_chatbot_comm()
                                                     │  ④ comm_open(target='jlab_sidebar_chatbot')
                                                     │  ⑤ comm_msg {type:'message', ...}
@@ -77,7 +77,7 @@ http://127.0.0.1:8888/files/008-standalone-comm-chatbot/chat.html?token=demo
 ```
 
 ### 3) 연결 패널 입력
-- **Jupyter 주소**: `http://127.0.0.1:8888/user/<id>/<server>/` (끝에 `lab?token=…` 이 붙어 있어도 자동 정리)
+- **Jupyter 주소**: `http://127.0.0.1:8888/` (끝에 `lab?token=…` 이 붙어 있어도 자동 정리)
 - **토큰**: 서버 실행 시의 token (예: `demo`)
 - **기존 커널 ID**: 비우면 새 커널 생성, 채우면 그 커널에 붙음
 - **모델 제공자/모델명**: `ollama` + `qwen3.5:0.8b` 등

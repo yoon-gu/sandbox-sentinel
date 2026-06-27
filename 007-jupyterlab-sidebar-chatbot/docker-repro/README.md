@@ -13,7 +13,7 @@
 | Pod (커널이 도는 곳) | **컨테이너 내부** |
 | 당신 노트북/PC 의 브라우저 | **호스트 브라우저** |
 | ingress 가 8888만 노출 | compose 가 **8888만 publish** (8765 는 일부러 안 함) |
-| `https://jupyterhub.example.com/user/<id>/<server>/lab` | `http://127.0.0.1:8888/user/<id>/<server>/lab` (base_url 흉내) |
+| 운영 JupyterLab URL | `http://127.0.0.1:8888/lab` (jupyter 기본 url) |
 
 핵심: 호스트 브라우저는 컨테이너의 `127.0.0.1` 에 닿지 못합니다(브라우저의 localhost ≠
 컨테이너의 localhost). 그래서 **별도 포트(옛 8765)** 로 가던 전송은 실패하고, **커널
@@ -26,7 +26,7 @@
 docker compose -f docker-repro/docker-compose.yml up -d --build
 
 # 열기 (토큰 demo)
-#   http://127.0.0.1:8888/user/<id>/<server>/lab?token=demo
+#   http://127.0.0.1:8888/lab?token=demo
 
 # 내리기
 docker compose -f docker-repro/docker-compose.yml down
@@ -39,7 +39,7 @@ docker compose -f docker-repro/docker-compose.yml down
    점검하려면 **(선택) 자가진단 셀**(`comm_selftest_cell.py`, 의존성 0) 실행.
 3. 우측 **💬 Chatbot** 탭에서 메시지 전송 → **답변이 토큰 스트리밍으로** 옵니다.
    → 8888 만 열린 컨테이너에서 되면, 같은 토폴로지의 실제 Pod 에서도 됩니다.
-   (통신은 `.../user/<id>/<server>/api/kernels/<id>/channels` 커널 웹소켓 — JupyterHub 가 프록시.)
+   (통신은 `api/kernels/<id>/channels` 커널 웹소켓.)
 
 > 호스트 Ollama 를 쓰는 경우(②의 `provider="ollama"`) 컨테이너 커널이
 > `host.docker.internal:11434` 로 호스트 Ollama 를 호출합니다(아래 메모).

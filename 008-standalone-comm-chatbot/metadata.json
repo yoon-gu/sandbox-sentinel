@@ -21,7 +21,7 @@
     "007 과 동일한 comm 프로토콜: 프론트→커널 {type:message|reset, session_id}, 커널→프론트 {type:ready|token|done|error|reset_ok}. COMM_TARGET 상수 일치('jlab_sidebar_chatbot')",
     "토큰 스트리밍: comm_msg(iopub)로 오는 {type:token} 을 봇 버블에 실시간 누적, {type:done, answer, steps} 로 최종 확정 + 중간 단계 접이식(<details>) 표시",
     "모델 제공자 UI 선택: ollama(키 불필요) / openai(base_url·api_key 입력칸 동적 표시, 사내 vLLM 대응) / stub(base_url=None, 모델 호출 0 — 전송 경로만 점검). 선택을 register_chatbot_comm(...) 파이썬 한 줄로 변환(문자열 리터럴 안전 인용)",
-    "원격/JupyterHub 대응: 주소 입력을 base_url(예: /user/<id>/<server>/)까지 포함해 정규화(.../lab?token= 붙여넣어도 베이스로 정리, URL 쿼리의 token 자동 추출). http→ws/https→wss 스킴 변환",
+    "주소 자동 정리: .../lab?token= 같은 주소를 붙여넣어도 베이스로 정규화(URL 쿼리의 token 자동 추출). http→ws/https→wss 스킴 변환",
     "토큰 인증으로 XSRF 우회: REST 는 Authorization: token <t> 헤더(쿠키/_xsrf 불필요), WS 는 헤더를 못 붙이므로 ?token= 쿼리",
     "보안: 토큰을 localStorage 등 디스크에 저장하지 않고 메모리(JS 변수)에만 보관. 사용 후 탭 닫기 안내. 봇/사용자/시스템 메시지는 textContent 로 출력(XSS 차단), 중간 단계 라벨만 escapeHtml 후 innerHTML"
   ],
@@ -36,6 +36,6 @@
   ],
   "verification": {
     "protocol_cross_check_2026-06-27": "Jupyter WS 프로토콜 가정(서브프로토콜 미지정 시 레거시 JSON 텍스트 fallback / 토큰 인증의 XSRF 우회 / 크로스오리진 CORS / comm_open·comm_msg 와이어 스키마 / execute_reply 상관)을 권위 출처로 멀티에이전트 교차검증 + chat.html 코드 리뷰",
-    "live_test": "사용자 dev 환경의 docker-repro(007: 8888 publish + base_url /user/<id>/<server>/ + token demo)에 브라우저로 붙여 ready→token→done 왕복 확인 필요"
+    "live_test": "표준 검증 pod(007 docker-repro: 8888 publish + jupyter 기본 url + token demo)에 브라우저로 붙여 ready→token→done 왕복 확인(stub & ollama qwen3.5:4b) 통과"
   }
 }

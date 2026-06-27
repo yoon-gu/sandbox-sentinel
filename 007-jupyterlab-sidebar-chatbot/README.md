@@ -35,7 +35,7 @@
 ## 아키텍처
 
 ```
-브라우저: JupyterLab 페이지   (JupyterHub 면 https://<hub>/user/<id>/<server>/lab)
+브라우저: JupyterLab 페이지
 ┌───────────────┬──────────────────┬─────────────────────┐
 │  파일 탐색기   │   노트북/에디터    │  💬 챗봇 탭 (right)  │  ← 프론트 labextension (src/)
 └──────┬────────┴──────────────────┴─────────┬───────────┘
@@ -165,7 +165,7 @@ register_chatbot_comm(
 8888 만 노출한 컨테이너로 "원격 Pod" 토폴로지를 재현합니다(자세한 건 `docker-repro/README.md`):
 ```bash
 docker compose -f docker-repro/docker-compose.yml up -d --build
-# http://127.0.0.1:8888/user/<id>/<server>/lab?token=demo
+# http://127.0.0.1:8888/lab?token=demo
 ```
 
 ## 빌드 시 주의 (lockfile 없는 환경에서 필요한 3가지 핀)
