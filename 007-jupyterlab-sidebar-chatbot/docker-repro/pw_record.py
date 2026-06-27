@@ -96,6 +96,30 @@ def settle(page: Page, ms=800):
     page.wait_for_timeout(ms)
 
 
+def jlab_open_notebook(page: Page, nb_path: str, *, kernel_wait=8000):
+    """JupyterLab 에서 노트북을 열고 셸/커널이 자리잡을 때까지 대기.
+
+    nb_path: root_dir(=리포루트) 기준 상대경로. 예: 001-.../demo.ipynb
+    """
+    page.goto(f"{BASE}lab/tree/{nb_path}?token={TOKEN}", wait_until="domcontentloaded")
+    page.wait_for_selector(".jp-Notebook", timeout=60_000)
+    # 'Select Kernel' 등 다이얼로그가 뜨면 기본값으로 통과
+    try:
+        btn = page.wait_for_selector(".jp-Dialog .jp-mod-accept", timeout=4000)
+        if btn:
+            btn.click()
+    except Exception:
+        pass  # 다이얼로그 없으면 정상
+    page.wait_for_timeout(kernel_wait)  # 커널 connecting→idle 여유
+
+
+def jlab_run_first_code_cell(page: Page):
+    """첫 번째 코드 셀을 선택해 Shift+Enter 로 실행."""
+    cell = page.locator(".jp-Notebook .jp-CodeCell").first
+    cell.click()
+    page.keyboard.press("Shift+Enter")
+
+
 if __name__ == "__main__":
     # 자가점검: 빈 페이지를 잠깐 녹화해 webm→webp 파이프라인이 도는지 확인.
     import tempfile
