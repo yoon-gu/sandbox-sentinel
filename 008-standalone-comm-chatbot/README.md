@@ -58,20 +58,23 @@ Jupyter Server ──(프록시: JupyterHub base_url)──▶ 커널(Pod)
 
 ### 2) `chat.html` 열기 — 두 가지 방법
 
-**(A) 같은 출처로 열기 — CORS 설정 불필요 (권장)**
-이 파일을 그 Jupyter 서버의 파일 트리에 두고 `/files/` 로 엽니다. 페이지 출처 = API 출처라 CORS 가 아예 없습니다.
-```
-http://<host>/user/<id>/<server>/files/chat.html?token=demo
-```
-
-**(B) 다른 출처로 열기 — 서버에 CORS 허용 필요**
-`file://` 로 직접 열거나 다른 포트에서 서빙하면, 원격 Jupyter 가 아래처럼 떠 있어야 합니다 (토큰 인증이라 쿠키/credentials 는 불필요):
+**서버에 `allow_origin='*'` 가 사실상 필수입니다** (라이브 검증으로 확인):
 ```
 jupyter lab --ServerApp.allow_origin='*'
 ```
-- 제약의 핵심은 **WebSocket** 입니다. REST 는 토큰 인증 시 출처를 봐주는 우회가 있지만, 커널 채널 WS 의 `check_origin` 에는 그 우회가 없어 `allow_origin` 설정이 반드시 필요합니다.
-- `file://` 페이지는 브라우저가 `Origin: null` 을 보내므로 **정확히 `'*'`** 여야 통과합니다(특정 출처 문자열로 좁히면 `null` 과 안 맞아 실패).
-- **JupyterHub** 는 토큰만으로 `_xsrf` 가 면제되지 않을 수 있습니다(jupyterhub#4845). 이 클라이언트는 **같은 출처**일 때 `_xsrf` 쿠키를 읽어 헤더로 동봉해 대응하므로, JupyterHub 에서는 위 (A) 같은-출처 방식을 권장합니다(교차 출처는 JS 가 `_xsrf` 쿠키를 못 읽어 미지원).
+왜냐하면 — 이 HTML 을 어떻게 열든 브라우저에선 **cross-origin** 으로 동작하기 때문입니다:
+- **`/files/` 로 서빙해도** Jupyter 가 CSP `sandbox allow-scripts`(= `allow-same-origin` 없음)를 붙여 페이지가 **opaque origin**(`Origin: null`)이 됩니다. 즉 "같은 출처"처럼 보여도 API 호출은 cross-origin 입니다. (이전 문서가 "같은 출처면 CORS 불필요"라 한 것은 이 sandbox 때문에 **틀렸습니다**.)
+- `file://` 로 직접 열어도 `Origin: null` 입니다.
+
+제약의 핵심:
+- **WebSocket** 이 결정타입니다. REST 는 토큰 인증 시 출처 우회가 있지만, 커널 채널 WS 의 `check_origin` 에는 그 우회가 없어 `allow_origin` 이 반드시 필요합니다.
+- `Origin: null` 은 **정확히 `'*'`** 여야 통과합니다(특정 출처 문자열로 좁히면 `null` 과 안 맞아 실패). 토큰 인증이라 쿠키/credentials 는 불필요.
+- sandbox(`allow-same-origin` 없음)에선 `document.cookie` 가 막혀 `_xsrf` 를 못 읽습니다 → 토큰 인증만 사용(순수 jupyter_server 는 토큰만으로 XSRF 면제). **JupyterHub** 는 토큰만으로 `_xsrf` 면제가 안 될 수 있어(jupyterhub#4845), 그 경우 이 클라이언트는 한계가 있습니다.
+
+여는 URL 예 (pod 표준 env = jupyter 기본 url):
+```
+http://127.0.0.1:8888/files/008-standalone-comm-chatbot/chat.html?token=demo
+```
 
 ### 3) 연결 패널 입력
 - **Jupyter 주소**: `http://127.0.0.1:8888/user/<id>/<server>/` (끝에 `lab?token=…` 이 붙어 있어도 자동 정리)
@@ -87,13 +90,16 @@ jupyter lab --ServerApp.allow_origin='*'
 
 별도 예제 스크립트가 없습니다 — **`chat.html` 자체가 예제이자 산출물**입니다(노트북 변환물의 `demo.ipynb` 와 같은 위치). 브라우저로 열어 연결 패널을 채우면 됩니다.
 
-가장 빠른 점검(007 의 docker-repro 사용):
+가장 빠른 점검(sandbox 표준 검증 pod 사용 — ingress 8888, jupyter 기본 url, 리포 루트 마운트, `allow_origin='*'`):
 ```bash
-# 007 폴더에서 (8888 publish + base_url /user/<id>/<server>/ + token demo)
+# 007 폴더에서
 docker compose -f docker-repro/docker-compose.yml up -d --build
 ```
-- 같은 출처로 쓰려면: `chat.html` 을 마운트된 작업폴더에 두고 `http://127.0.0.1:8888/user/<id>/<server>/files/chat.html?token=demo`
-- 제공자 `stub` 으로 먼저 **전송 경로만**(모델 없이 `ready→done`) 확인 → 그다음 `ollama` 로 실제 답변.
+- 브라우저로 `http://127.0.0.1:8888/files/008-standalone-comm-chatbot/chat.html?token=demo`
+- 연결 패널: 주소 `http://127.0.0.1:8888/`, 토큰 `demo`
+- 제공자 `stub` 으로 먼저 **전송 경로만**(모델 없이 `ready→done`) 확인 → 그다음 `ollama`(모델 `qwen3.5:4b` 등, `0.8b` 는 미설치) 로 실제 답변.
+
+데모: [`demo.webp`](demo.webp) — stub 제공자로 연결 → 스트리밍 → 응답까지 (Playwright 녹화).
 
 ---
 

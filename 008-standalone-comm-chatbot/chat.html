@@ -206,8 +206,17 @@ function wsUrl(apiPath) {
   return u.toString();
 }
 function getCookie(name) {
-  const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
-  return m ? decodeURIComponent(m[1]) : "";
+  // ⚠️ 이 파일을 Jupyter 의 /files/ 로 서빙하면 CSP 가 'sandbox allow-scripts'(=
+  //    allow-same-origin 없음)라 document.cookie 접근이 SecurityError 를 던지고,
+  //    페이지는 opaque origin(Origin: null)으로 동작합니다. try/catch 로 무력화하고
+  //    그 경우 _xsrf 없이 토큰 인증만 씁니다(순수 jupyter_server 는 토큰만으로 XSRF 면제).
+  //    ※ 단, opaque origin 이라 REST/WS 가 cross-origin → 서버에 allow_origin='*' 필요.
+  try {
+    const m = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+    return m ? decodeURIComponent(m[1]) : "";
+  } catch (_) {
+    return "";   // sandbox(allow-same-origin 없음) — 쿠키 접근 불가
+  }
 }
 function authHeaders() {
   // 순수 jupyter_server 는 토큰 인증이면 XSRF 검사를 건너뜁니다(_xsrf 불필요).

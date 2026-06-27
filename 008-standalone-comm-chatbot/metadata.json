@@ -28,7 +28,7 @@
   "limitations": [
     "007 패키지 의존: 대상 커널에 jlab_sidebar_chatbot(+모델 백엔드)가 설치돼 있어야 함. 없으면 register 단계에서 ImportError 를 화면에 표시. 이 HTML 자체는 무의존(브라우저 표준 API)",
     "레거시 JSON-텍스트 WS 프로토콜 가정: 서브프로토콜('v1.kernel.websocket.jupyter.org')을 요청하지 않아 jupyter_server 가 JSON 텍스트 프레임으로 동작하는 경로에 의존. 이 fallback 이 제거된 미래 jupyter_server 에서는 바이너리 v1 프레이밍 구현이 추가로 필요(현재 코드에 ponytail 주석으로 명시)",
-    "CORS: 이 HTML 을 Jupyter '바깥'(file:// 또는 다른 포트)에서 열면 서버에 ServerApp.allow_origin 설정 필요(토큰 인증이라 credentials/쿠키는 불필요). 같은 출처(그 Jupyter 의 /files/ 로 서빙)면 불필요",
+    "CORS: 서버에 ServerApp.allow_origin='*' 가 사실상 필수(라이브 검증 확인). /files/ 로 서빙해도 Jupyter 가 CSP 'sandbox allow-scripts'(allow-same-origin 없음)를 붙여 페이지가 opaque origin(Origin: null) → '같은 출처'처럼 보여도 REST/WS 는 cross-origin. WS check_origin 통과를 위해 allow_origin 필요(Origin null 은 정확히 '*' 여야 매칭, 토큰 인증이라 credentials 불필요). sandbox 라 document.cookie 막힘 → _xsrf 없이 토큰 인증만(순수 jupyter_server 는 토큰만으로 XSRF 면제; JupyterHub 는 한계)",
     "새 커널 기본 생성: 기존 커널 ID 를 비우면 매 연결마다 커널을 새로 띄움(자원 누적 가능). 명시적 '연결 해제'는 WS 만 닫고 커널은 남김 — 정리는 Jupyter 측에서",
     "online_only: 전송 계층(Comm)은 망 독립이지만 실제 답변은 모델(provider) 호출 필요. stub 으로 전송 경로만 무모델 점검 가능",
     "단일 턴 직렬: 한 번에 한 메시지만(전송 중 입력 잠금). 멀티 동시 대화 미지원",
